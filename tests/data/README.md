@@ -12,7 +12,7 @@ laboratory, or institution.
 ```
 tests/data/
 ├── foundation/      synthetic FoundationOne / FoundationOneLiquid XML
-├── genminetop/      synthetic GenMineTOP / TodaiOncoPanel XML
+├── genminetop/      synthetic GenMineTOP XML
 └── guardant/        synthetic Guardant360 Excel reports
 ```
 

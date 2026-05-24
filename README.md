@@ -4,7 +4,7 @@ A deployable, vendor-agnostic database and web interface for the integrated
 re-use of multi-vendor cancer genomic panel reports.
 
 OncoUnify ingests reports produced by **FoundationOne / FoundationOneLiquid**
-(Foundation Medicine, XML), **GenMineTOP / TodaiOncoPanel** (XML), and
+(Foundation Medicine, XML), **GenMineTOP** (XML), and
 **Guardant360** (Excel `.xlsx`), normalises them into a single relational
 schema, and exposes them through a lightweight CGI-based web interface for
 cross-vendor search, per-case drill-down, and registry-level statistics.
@@ -32,7 +32,7 @@ python3 load_guardant.py    panels.db /path/to/guardant_xlsx_dir
 OncoUnify/
 ├── schema.sql                  # canonical relational schema
 ├── load_foundation.py          # FoundationOne / FoundationOneLiquid XML loader
-├── load_genminetop.py          # GenMineTOP (TodaiOncoPanel) XML loader
+├── load_genminetop.py          # GenMineTOP XML loader
 ├── load_guardant.py            # Guardant360 Excel loader
 ├── panel_search.cgi            # cross-vendor search
 ├── case_detail.cgi             # per-case drill-down
