@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>OncoUnify search</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #f5fbff 0, #e3f0ff 30%, #f5f7fb 100%);
+      color: #222;
+    }
+    .page-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    .card {
+      width: 100%;
+      max-width: 980px;
+      background: #ffffffee;
+      border-radius: 18px;
+      box-shadow:
+        0 16px 45px rgba(15, 35, 95, 0.18),
+        0 0 0 1px rgba(255, 255, 255, 0.9);
+      padding: 2.2rem 2.4rem 2rem;
+      backdrop-filter: blur(6px);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+      margin-bottom: 1.6rem;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 1rem;
+    }
+    .card-title {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 650;
+      color: #123055;
+      letter-spacing: 0.04em;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      background: linear-gradient(120deg, #0ea5e9, #22c55e);
+      color: #fff;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .pill-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #facc15;
+      box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.35);
+    }
+    .card-meta {
+      font-size: 0.78rem;
+      color: #6b7280;
+      text-align: right;
+      line-height: 1.6;
+    }
+    .logout-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-top: 0.4rem;
+      color: #b91c1c;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .logout-link:hover { text-decoration: underline; }
+
+    form {
+      margin-top: 0.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem 1.4rem;
+      align-items: flex-start;
+    }
+    .field-group { display: flex; flex-direction: column; gap: 0.25rem; }
+    .field-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #4b5563;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .field-label span.hint { font-weight: 400; font-size: 0.72rem; color: #9ca3af; }
+    .field-label::before {
+      content: "";
+      width: 4px;
+      height: 4px;
+      border-radius: 999px;
+      background: #0ea5e9;
+    }
+
+    input[type="text"], input[type="number"], select {
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      padding: 0.5rem 0.85rem;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+      background: #f9fafb;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus {
+      border-color: #0ea5e9;
+      box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.4);
+      background: #ffffff;
+    }
+    select { cursor: pointer; }
+
+    .form-footer {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.5rem;
+      padding-top: 0.75rem;
+      border-top: 1px dashed #e5e7eb;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .footer-note { font-size: 0.75rem; color: #9ca3af; }
+    .footer-note strong { color: #4b5563; font-weight: 600; }
+
+    button[type="submit"] {
+      border: none;
+      border-radius: 999px;
+      padding: 0.55rem 1.4rem 0.6rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      cursor: pointer;
+      background: linear-gradient(135deg, #0ea5e9, #2563eb);
+      color: #ffffff;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, 0.35);
+    }
+    button[type="submit"]::after { content: "⌕"; font-size: 0.9rem; }
+
+    .update-info {
+      margin-top: 0.6rem;
+      font-size: 0.7rem;
+      color: #9ca3af;
+      text-align: right;
+    }
+    .update-info span {
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      background: #ecfdf3;
+      color: #16a34a;
+      border: 1px solid #bbf7d0;
+    }
+
+    .stats-container {
+      margin-top: 1.4rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+    }
+    .stats-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.4rem;
+    }
+    .stats-frame {
+      width: 100%;
+      border: none;
+      min-height: 260px;
+      border-radius: 12px;
+      box-shadow: inset 0 0 0 1px #e5e7eb;
+      background: #f9fafb;
+    }
+
+    @media (max-width: 640px) {
+      .card { padding: 1.5rem 1.4rem 1.4rem; }
+      .card-header { flex-direction: column; align-items: flex-start; }
+      .card-meta { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-wrapper">
+    <div class="card">
+      <div class="card-header">
+        <h1 class="card-title">
+          OncoUnify search
+          <span class="pill">
+            <span class="pill-dot"></span>
+            Query Console
+          </span>
+        </h1>
+        <div class="card-meta">
+          <div>Variant / Case / Patient cross-query interface</div>
+          <div>Cross-vendor search by HGVS, gene, patient ID, or tissue</div>
+          <a class="logout-link" href="/cgi-bin/logout.cgi">Logout</a>
+        </div>
+      </div>
+
+      <form method="get" action="/cgi-bin/panel_search.cgi">
+        <div class="field-group">
+          <label class="field-label">
+            Gene
+            <span class="hint">e.g., TP53, BRCA1 (autocomplete enabled)</span>
+          </label>
+          <input id="geneInput" type="text" name="gene" list="geneList" placeholder="e.g., TP53, BRCA1">
+          <datalist id="geneList"></datalist>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Protein change
+            <span class="hint">e.g., G12D, p.G12D, N718S</span>
+          </label>
+          <input id="proteinInput" type="text" name="protein_effect" list="proteinList" placeholder="e.g., G12D">
+          <datalist id="proteinList"></datalist>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Patient ID
+            <span class="hint">substring match</span>
+          </label>
+          <input type="text" name="patient_id" placeholder="e.g., 0970021701320">
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Variant type
+            <span class="hint">select a category</span>
+          </label>
+          <select name="variant_type">
+            <option value="">(all)</option>
+            <option value="short_variant">SNV/indel</option>
+            <option value="cnv">copy-number alteration</option>
+            <option value="rearrangement">rearrangement / fusion</option>
+            <option value="expression">gene expression</option>
+            <option value="biomarker">biomarker</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Disease / tissue
+            <span class="hint">substring match, autocomplete enabled</span>
+          </label>
+          <input id="diseaseInput" type="text" name="disease" list="diseaseList" placeholder="e.g., colon, lung adenocarcinoma">
+          <datalist id="diseaseList"></datalist>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Panel
+            <span class="hint">testing platform</span>
+          </label>
+          <select name="panel_name">
+            <option value="">(all)</option>
+            <option value="FoundationOne">FoundationOne</option>
+            <option value="FoundationOneLiquid">FoundationOneLiquid</option>
+            <option value="GenMineTOP">GenMineTOP</option>
+            <option value="Guardant">Guardant</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Result granularity
+            <span class="hint">use patient / case to suppress duplicates</span>
+          </label>
+          <select name="view_mode">
+            <option value="variant">per variant</option>
+            <option value="patient">per patient</option>
+	    <!--<option value="case">per case</option>-->
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">
+            Max rows per page
+            <span class="hint">1&ndash;100000 (default: 500)</span>
+          </label>
+          <input type="number" name="limit" value="500" min="1" max="100000">
+        </div>
+
+        <div class="form-footer">
+          <div class="footer-note">
+            <strong>Search hint:</strong>
+            In per-patient / per-case modes, a single row represents a patient or case carrying any variant that matched the criteria.
+          </div>
+          <button type="submit">Search</button>
+        </div>
+      </form>
+
+      <div class="update-info">
+        update : <span>2026/03/04</span>
+      </div>
+
+      <div class="stats-container">
+        <div class="stats-title">Registry overview (summary statistics)</div>
+        <iframe src="/cgi-bin/panel_stats.cgi" class="stats-frame" title="Panel stats"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function setOptions(datalistId, items) {
+      const dl = document.getElementById(datalistId);
+      if (!dl) return;
+      dl.innerHTML = "";
+      (items || []).forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        dl.appendChild(opt);
+      });
+    }
+
+    function debounce(fn, ms) {
+      let t = null;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+      };
+    }
+
+    function lastTokenCommaSeparated(s) {
+      const parts = s.split(",");
+      return parts[parts.length - 1].trim();
+    }
+
+    async function fetchSuggest(type, q) {
+      const url = new URL("/cgi-bin/suggest.cgi", window.location.origin);
+      url.searchParams.set("type", type);
+      url.searchParams.set("q", q);
+      url.searchParams.set("limit", "30");
+      const res = await fetch(url.toString(), { cache: "no-store" });
+      if (!res.ok) return [];
+      const js = await res.json();
+      return js.items || [];
+    }
+
+    const updateGene = debounce(async () => {
+      const input = document.getElementById("geneInput");
+      const q = lastTokenCommaSeparated(input.value);
+      if (q.length < 1) { setOptions("geneList", []); return; }
+      const items = await fetchSuggest("gene", q);
+      setOptions("geneList", items);
+    }, 150);
+
+    const updateProtein = debounce(async () => {
+      const input = document.getElementById("proteinInput");
+      const q = input.value.trim();
+      if (q.length < 1) { setOptions("proteinList", []); return; }
+      const items = await fetchSuggest("protein", q);
+      setOptions("proteinList", items);
+    }, 150);
+
+    const updateDisease = debounce(async () => {
+      const input = document.getElementById("diseaseInput");
+      const q = input.value.trim();
+      if (q.length < 2) { setOptions("diseaseList", []); return; }
+      const items = await fetchSuggest("disease", q);
+      setOptions("diseaseList", items);
+    }, 180);
+
+    document.getElementById("geneInput").addEventListener("input", updateGene);
+    document.getElementById("proteinInput").addEventListener("input", updateProtein);
+    document.getElementById("diseaseInput").addEventListener("input", updateDisease);
+
+    function resizeStatsFrame() {
+      const iframe = document.querySelector('.stats-frame');
+      if (!iframe) return;
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!doc || !doc.body) return;
+        iframe.style.height = (doc.body.scrollHeight + 8) + 'px';
+      } catch (e) {}
+    }
+    window.addEventListener('load', resizeStatsFrame);
+    window.addEventListener('resize', resizeStatsFrame);
+    document.addEventListener('DOMContentLoaded', () => {
+      const iframe = document.querySelector('.stats-frame');
+      if (iframe) iframe.addEventListener('load', resizeStatsFrame);
+    });
+  </script>
+</body>
+</html>
