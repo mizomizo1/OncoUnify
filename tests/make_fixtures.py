@@ -154,6 +154,9 @@ def write_foundation():
                transcript="NM_000546"),
             sv("STK11", "chr19:1220676", "580G>T", "D194Y", "missense", 0.1120, 510, status="unknown",
                transcript="NM_000455"),
+            # previous HGNC symbol as used in Foundation Medicine reports (current: NSD3)
+            sv("WHSC1L1", "chr8:38174537", "1780C>T", "R594*", "nonsense", 0.2010, 604, status="likely",
+               strand="-", transcript="NM_023034"),
         ],
         cnvs=[{"copy-number": "0", "equivocal": "false", "gene": "CDKN2A", "number-of-exons": "3 of 3",
                "position": "chr9:21967751-21995300", "ratio": "0.12", "status": "known", "type": "loss"}],
@@ -455,7 +458,8 @@ SYN_PANELS = {
     # file stem: (panel_name, panel_version, genes with short-variant coverage, CNA genes, fusion genes)
     "synthetic_FoundationOneDx": (
         "FoundationOne", "FoundationOneDx",
-        "ALK APC AR ARID1A BRAF BRCA1 BRCA2 CDKN2A EGFR ERBB2 FBXW7 KRAS MET MYC NTRK1 PIK3CA PTEN SMAD4 STK11 TERT TP53",
+        "ALK APC AR ARID1A BRAF BRCA1 BRCA2 CDKN2A EGFR ERBB2 FBXW7 KRAS MET MYC NTRK1 PIK3CA PTEN SMAD4 STK11 TERT TP53 "
+        "WHSC1L1",
         "AR CDKN2A EGFR ERBB2 MET MYC", "ALK EGFR MET NTRK1"),
     "synthetic_FoundationOneLiquidDx": (
         "FoundationOneLiquid", "FoundationOneLiquidDx",

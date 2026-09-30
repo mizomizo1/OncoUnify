@@ -92,6 +92,18 @@ def report(db: str, examples: int = 0) -> dict:
         "reports": n_cases,
     }
 
+    # short variants in genes that are not in the assay's gene list (outdated list or symbol mismatch)
+    outside = q(conn, """
+        SELECT c.panel_name, c.panel_version, v.gene, COUNT(*) FROM variants v JOIN cases c USING(case_id)
+        JOIN panel_versions pv ON pv.panel_name = c.panel_name AND pv.panel_version = c.panel_version
+        WHERE v.variant_type = 'short_variant' AND (v.status IS NULL OR v.status != 'not_called')
+          AND NOT EXISTS (SELECT 1 FROM panel_genes pg WHERE pg.panel_version_id = pv.panel_version_id
+                          AND pg.gene = v.gene AND pg.short_variants = 1)
+        GROUP BY 1, 2, 3 ORDER BY 4 DESC, 3""")
+    out["genes_outside_gene_list"] = [dict(zip(("panel_name", "panel_version", "gene", "n"), r)) for r in outside]
+    out["gene_symbols_harmonized"] = q(conn, "SELECT COUNT(*) FROM variants WHERE extra LIKE '%\"vendor_gene\"%' "
+                                             "OR extra LIKE '%\"vendor_other_gene\"%'")[0][0]
+
     # reliability of rule-based inference against vendor-supplied categories
     group = {t: g for t, g in q(conn, "SELECT term, display_group FROM so_terms")}
     rows = q(conn, "SELECT v.hgvs_p, v.cds_effect, v.functional_effect_raw, v.protein_effect FROM variants v "
@@ -214,6 +226,11 @@ def main(argv=None) -> int:
           f"{c['with_oncotree_code']}, patient id {c['with_patient_id']}, sidecar-curated {c['with_curated_fields']}")
     g = r["gene_lists"]
     print(f"== Gene lists: {g['reports_with_gene_list']} of {g['reports']} reports have an assay gene list")
+    og = r["genes_outside_gene_list"]
+    print(f"== Short-variant rows in genes outside the assay gene list: {sum(x['n'] for x in og)} "
+          f"({len(og)} panel/gene pairs); gene symbols harmonized to HGNC: {r['gene_symbols_harmonized']} rows")
+    for x in og[:25]:
+        print(f"     {x['panel_name']:<20} {str(x['panel_version']):<22} {x['gene']:<12} n={x['n']}")
     i = r["inference_vs_vendor"]
     print(f"== Rule-based consequence vs vendor category: {i['variants_with_vendor_category']} variants; "
           f"same SO term {i['same_term']} ({i['same_term_pct']}%), same display group "

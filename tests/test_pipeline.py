@@ -29,7 +29,7 @@ PY = sys.executable
 
 # Expected content of the synthetic fixtures (report_id -> number of variant rows)
 EXPECTED_VARIANTS = {
-    "SYN-F1-0001": 7, "SYN-F1-0002": 5, "SYN-F1L-0003": 4,
+    "SYN-F1-0001": 7, "SYN-F1-0002": 6, "SYN-F1L-0003": 4,
     "SYN-GM-0001": 9, "SYN-GM-0002": 4,
     "SYN-G360-0001": 5, "SYN-G360-0002": 5,
 }
@@ -206,13 +206,25 @@ class Pipeline(unittest.TestCase):
         row = self.q("SELECT report_id, patient_id FROM cases WHERE panel_name = 'Guardant' ORDER BY report_id")
         self.assertEqual(row, [("SYN-G360-0001", "SYNPT-0001"), ("SYN-G360-0002", "SYNPT-0004")])
 
+    # -- gene symbols: previous HGNC symbols are harmonized -------------------------
+    def test_gene_symbols_are_harmonized(self):
+        row = self.q("SELECT gene, extra FROM variants WHERE gene = 'NSD3'")
+        self.assertEqual(len(row), 1)
+        self.assertEqual(json.loads(row[0][1])["vendor_gene"], "WHSC1L1")
+        self.assertEqual(self.q("SELECT COUNT(*) FROM variants WHERE gene = 'WHSC1L1'")[0][0], 0)
+        listed = {g for (g,) in self.q("SELECT gene FROM panel_genes")}
+        self.assertIn("NSD3", listed)
+        self.assertNotIn("WHSC1L1", listed)
+        tested = dict(self.q("SELECT gene, COUNT(DISTINCT case_id) FROM v_case_genes_tested GROUP BY gene"))
+        self.assertEqual(tested["NSD3"], 2)          # both FoundationOne CDx reports
+
     # -- reviewer 3, major 8: reliability of rule-based consequences ------------
     def test_qc_report(self):
         p = run(ROOT / "tools" / "qc_report.py", self.db, "--json")
         r = json.loads(p.stdout)
         i = r["inference_vs_vendor"]
-        self.assertEqual(i["variants_with_vendor_category"], 12)
-        self.assertEqual(i["same_term"], 11)   # TERT c.-124C>T: vendor 'promoter', rules '5_prime_UTR_variant'
+        self.assertEqual(i["variants_with_vendor_category"], 13)
+        self.assertEqual(i["same_term"], 12)   # TERT c.-124C>T: vendor 'promoter', rules '5_prime_UTR_variant'
         self.assertEqual(r["gene_lists"], {"reports_with_gene_list": 7, "reports": 7})
 
     # -- reviewer 1, M5: denominators -----------------------------------------
@@ -325,6 +337,8 @@ class CGI(unittest.TestCase):
         self.assertIn("ARID1A", {r["gene"] for r in self.tsv("gene=AR&gene_match=substring")})
         partners = {(r["gene"], r["other_gene"]) for r in self.tsv("gene=ALK")}
         self.assertEqual(partners, {("EML4", "ALK")})
+        # a previous HGNC symbol finds the harmonized row
+        self.assertEqual({r["gene"] for r in self.tsv("gene=WHSC1L1")}, {"NSD3"})
 
     def test_protein_query_forms(self):
         self.assertEqual(len(self.tsv("protein_effect=G12")), 3)             # residue query

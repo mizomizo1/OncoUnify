@@ -48,6 +48,13 @@ reports or upgraded with `migrate_db.py`.
 - Panel-aware statistics (`n_mutated / n_tested`).
 - `logout.cgi` removed.
 
+### Gene content and symbols
+- Official gene lists for FoundationOne CDx, FoundationOne Liquid CDx,
+  GenMineTOP and Guardant360 CDx (Japan) extracted from public vendor
+  documents and checked against HGNC.
+- Previous HGNC symbols used by vendors are harmonized to current symbols
+  (`gene_symbol_map`), in variants and gene lists; searches resolve them.
+
 ### Packaging
 - MIT LICENSE file, Dockerfile and docker-compose demo, GitHub Actions CI,
   synthetic fixtures and automated tests, complete field mapping

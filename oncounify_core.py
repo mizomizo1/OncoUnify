@@ -159,6 +159,52 @@ def to_json(d: Optional[Dict[str, Any]]) -> Optional[str]:
     return json.dumps(kept, ensure_ascii=False, sort_keys=True)
 
 
+# Previous HGNC symbols used by the supported vendors -> current approved
+# symbol (HGNC complete set, accessed 2026-09-30).  Mirrors the gene_symbol_map
+# table in schema.sql.
+GENE_SYMBOL_MAP: Dict[str, str] = {
+    "C11orf30": "EMSY",
+    "C17orf39": "GID4",
+    "FAM46C": "TENT5C",
+    "H3F3A": "H3-3A",
+    "MRE11A": "MRE11",
+    "PARK2": "PRKN",
+    "WHSC1": "NSD2",
+    "WHSC1L1": "NSD3",
+    "FAM118B": "SIRAL1",
+    "SLC22A18": "SLC67A1",
+    "STK19": "WHR1",
+}
+
+
+def current_symbol(symbol: Optional[str]) -> Optional[str]:
+    s = clean_str(symbol)
+    return GENE_SYMBOL_MAP.get(s, s) if s else None
+
+
+def harmonize_gene_symbols(variants: List[Dict[str, Any]]) -> int:
+    """
+    Replace previous HGNC symbols in gene / other_gene by the current symbol,
+    keeping the vendor's symbol in the JSON column `extra`
+    (vendor_gene / vendor_other_gene).  Returns the number of changed fields.
+    """
+    changed = 0
+    for v in variants:
+        notes = {}
+        for col, key in (("gene", "vendor_gene"), ("other_gene", "vendor_other_gene")):
+            old = clean_str(v.get(col))
+            new = current_symbol(old)
+            if old and new != old:
+                v[col] = new
+                notes[key] = old
+                changed += 1
+        if notes:
+            extra = json.loads(v["extra"]) if v.get("extra") else {}
+            extra.update(notes)
+            v["extra"] = to_json(extra)
+    return changed
+
+
 def normalize_chrom(x: Any) -> Optional[str]:
     """Return a UCSC-style chromosome name ('chr1' .. 'chr22', 'chrX', 'chrY', 'chrM')."""
     s = clean_str(x)
@@ -949,6 +995,7 @@ def run_loader(
                 raise LoaderFormatError("no genome build could be determined; pass --genome-build")
             if apply_case_metadata(rep.case, metadata):
                 stats["curated"] += 1
+            harmonize_gene_symbols(rep.variants)
             case_id, action = replace_report(conn, rep)
             stats[action] += 1
             stats["variants"] += len(rep.variants)

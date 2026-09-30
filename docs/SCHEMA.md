@@ -99,6 +99,19 @@ discordant notations (`--examples`).
 Steps 2–5 give `functional_effect_source = 'inferred'`.  The rules operate on
 notation only (no transcript model); see Limitations in the manuscript.
 
+## `gene_symbol_map` — gene symbol harmonization
+
+Vendors do not all use current HGNC symbols; Foundation Medicine, for
+example, reports `WHSC1L1` where GenMineTOP reports `NSD3`.  The table lists
+the previous symbols used in the supported vendors' gene lists with their
+current approved symbol (HGNC complete set, accessed 2026-09-30): C11orf30 →
+EMSY, C17orf39 → GID4, FAM46C → TENT5C, H3F3A → H3-3A, MRE11A → MRE11,
+PARK2 → PRKN, WHSC1 → NSD2, WHSC1L1 → NSD3, FAM118B → SIRAL1, SLC22A18 →
+SLC67A1, STK19 → WHR1.  Loaders store the current symbol in `variants.gene`
+/ `other_gene` and `panel_genes.gene` (keeping the vendor symbol in
+`variants.extra`), and the search interface resolves previous symbols, so a
+gene is counted once across vendors.
+
 ## `cases` — one row per report
 
 | column | type | meaning |
@@ -134,7 +147,7 @@ notation only (no transcript model); see Limitations in the manuscript.
 |---|---|---|
 | variant_id | INTEGER PK | |
 | case_id | INTEGER NOT NULL | FK → cases (ON DELETE CASCADE) |
-| gene | TEXT | HGNC symbol as reported (5′ partner for fusions) |
+| gene | TEXT | current HGNC symbol (5′ partner for fusions); previous symbols used by vendors are replaced through `gene_symbol_map` and the vendor symbol is kept in `extra.vendor_gene` |
 | variant_type | TEXT NOT NULL | `short_variant` \| `cnv` \| `rearrangement` (fusions, rearrangements, RNA exon skipping) \| `expression` |
 | variant_subtype | TEXT | vendor-native class label, verbatim (e.g. `amplification`, `fusion`, `splicing-variant`, `SNV`, `Deletion`) |
 | chrom, pos | TEXT, INTEGER | position; start of a CNV segment; first breakpoint |
@@ -155,7 +168,7 @@ notation only (no transcript model); see Limitations in the manuscript.
 | depth | INTEGER | read depth at the locus |
 | copy_number, cnv_ratio | REAL | vendor-native values; **not harmonized** across vendors |
 | cnv_type | TEXT | `amplification` \| `deletion` \| `other` |
-| other_gene | TEXT | fusion / rearrangement partner (3′ partner) |
+| other_gene | TEXT | fusion / rearrangement partner (3′ partner); harmonized like `gene` |
 | in_frame | TEXT | `yes` \| `no` \| `unknown` |
 | supporting_read_pairs | INTEGER | DNA evidence for rearrangements (Foundation Medicine) |
 | read_count | INTEGER | RNA reads supporting a fusion/exon skipping event, or expression read count |

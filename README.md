@@ -83,7 +83,7 @@ OncoUnify/
 ├── panel_stats.cgi         registry overview with panel-aware frequencies
 ├── suggest.cgi             autocomplete endpoint (JSON)
 ├── search.html             search form
-├── panels/                 assay gene lists (see panels/README.md)
+├── panels/                 official assay gene lists (see panels/README.md)
 ├── tools/qc_report.py      registry quality report (incl. consequence-inference check)
 ├── docs/                   INSTALL, SCHEMA, LOADER_DEV, CURATION, field_mapping.tsv, WORKED_EXAMPLE
 ├── docker/, Dockerfile, docker-compose.yml

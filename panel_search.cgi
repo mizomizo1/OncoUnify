@@ -114,8 +114,11 @@ if ($gene ne '') {
     if ($gene_match eq 'exact') {
         my %seen; my @vals = grep { !$seen{$_}++ } map { ($_, uc $_) } @tok;
         my $ph = join(',', ('?') x @vals);
-        push @where, "(variants.gene IN ($ph) OR variants.other_gene IN ($ph))";
-        push @bind, @vals, @vals;
+        # previous HGNC symbols (e.g. WHSC1L1) resolve to the current symbol (NSD3)
+        my $cur = "SELECT symbol FROM gene_symbol_map WHERE previous_symbol IN ($ph)";
+        push @where, "(variants.gene IN ($ph) OR variants.other_gene IN ($ph) "
+                   . "OR variants.gene IN ($cur) OR variants.other_gene IN ($cur))";
+        push @bind, @vals, @vals, @vals, @vals;
     } else {
         push @where, '(' . join(' OR ', map { "variants.gene LIKE ? ESCAPE '\\' OR variants.other_gene LIKE ? ESCAPE '\\'" } @tok) . ')';
         push @bind, map { ('%' . _like($_) . '%') x 2 } @tok;

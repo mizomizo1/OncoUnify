@@ -79,7 +79,13 @@ def parse_panel_file(path: Path) -> Tuple[Dict[str, str], List[Tuple[str, int, i
         raise ValueError(f"duplicated gene symbol(s): {', '.join(dups)}")
     if not rows:
         raise ValueError("no genes listed")
-    return meta, rows
+    # previous HGNC symbols -> current symbol, as for variants; merge flags if both appear
+    merged: Dict[str, List[int]] = {}
+    for gene, sv, cn, rr in rows:
+        cur = oc.current_symbol(gene)
+        f = merged.setdefault(cur, [0, 0, 0])
+        merged[cur] = [max(f[0], sv), max(f[1], cn), max(f[2], rr)]
+    return meta, [(g, *flags) for g, flags in merged.items()]
 
 
 def main(argv=None) -> int:

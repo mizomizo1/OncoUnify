@@ -59,6 +59,30 @@ INSERT OR REPLACE INTO so_terms (term, accession, display_group) VALUES
     ('non_coding_transcript_variant', 'SO:0001619', 'noncoding');
 
 -- ---------------------------------------------------------------------------
+-- gene_symbol_map: previous HGNC symbols used by the supported vendors and the
+-- current approved symbol (HGNC complete set, accessed 2026-09-30).  Loaders
+-- store the current symbol in variants.gene / other_gene and panel_genes.gene
+-- and keep the vendor's symbol in variants.extra; searches resolve previous
+-- symbols.  Kept identical to oncounify_core.GENE_SYMBOL_MAP (checked by tests).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gene_symbol_map (
+    previous_symbol  TEXT PRIMARY KEY,
+    symbol           TEXT NOT NULL
+);
+INSERT OR REPLACE INTO gene_symbol_map (previous_symbol, symbol) VALUES
+    ('C11orf30', 'EMSY'),
+    ('C17orf39', 'GID4'),
+    ('FAM46C',   'TENT5C'),
+    ('H3F3A',    'H3-3A'),
+    ('MRE11A',   'MRE11'),
+    ('PARK2',    'PRKN'),
+    ('WHSC1',    'NSD2'),
+    ('WHSC1L1',  'NSD3'),
+    ('FAM118B',  'SIRAL1'),
+    ('SLC22A18', 'SLC67A1'),
+    ('STK19',    'WHR1');
+
+-- ---------------------------------------------------------------------------
 -- cases: one row per vendor report
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS cases (

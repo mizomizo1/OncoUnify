@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import unittest
@@ -125,6 +126,16 @@ class Consequence(unittest.TestCase):
         self.assertEqual(self.term(None, None, hint="protein_coding", ref="CA", alt="C"), "frameshift_variant")
         term, so, source = oc.classify_consequence(None, None)
         self.assertEqual((term, so, source), ("sequence_variant", "SO:0001060", "unclassified"))
+
+    def test_gene_symbol_map_matches_schema(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
+        self.assertEqual(dict(conn.execute("SELECT previous_symbol, symbol FROM gene_symbol_map")), oc.GENE_SYMBOL_MAP)
+        rows = [{"gene": "WHSC1L1", "other_gene": "MRE11A", "extra": '{"x": 1}'}, {"gene": "TP53"}]
+        self.assertEqual(oc.harmonize_gene_symbols(rows), 2)
+        self.assertEqual((rows[0]["gene"], rows[0]["other_gene"]), ("NSD3", "MRE11"))
+        self.assertEqual(json.loads(rows[0]["extra"]), {"x": 1, "vendor_gene": "WHSC1L1", "vendor_other_gene": "MRE11A"})
+        self.assertEqual(rows[1], {"gene": "TP53"})
 
     def test_every_term_has_a_group(self):
         self.assertEqual(set(oc.SO_TERMS), set(oc.SO_GROUP))

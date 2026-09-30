@@ -24,6 +24,9 @@
                 <short-variant allele-fraction="0.1120" cds-effect="580G&gt;T" depth="510" equivocal="false" functional-effect="missense" gene="STK11" percent-reads="11.20" position="chr19:1220676" protein-effect="D194Y" status="unknown" strand="+" transcript="NM_000455">
                     <dna-evidence sample="SQ-SYN0000002-1"/>
                 </short-variant>
+                <short-variant allele-fraction="0.2010" cds-effect="1780C&gt;T" depth="604" equivocal="false" functional-effect="nonsense" gene="WHSC1L1" percent-reads="20.10" position="chr8:38174537" protein-effect="R594*" status="likely" strand="-" transcript="NM_023034">
+                    <dna-evidence sample="SQ-SYN0000002-1"/>
+                </short-variant>
             </short-variants>
             <copy-number-alterations>
                 <copy-number-alteration copy-number="0" equivocal="false" gene="CDKN2A" number-of-exons="3 of 3" position="chr9:21967751-21995300" ratio="0.12" status="known" type="loss">

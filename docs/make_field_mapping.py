@@ -63,7 +63,8 @@ ROWS = [
     ("cases", "loaded_at", "loader", "loader", "loader", "provenance"),
 
     ("variants", "gene", "short-variant/@gene; copy-number-alteration/@gene; rearrangement/@targeted-gene",
-     "alterations/item/gene (first item for fusions)", "SNV, Indels, CNAs: gene; Fusion(s): gene_a", ""),
+     "alterations/item/gene (first item for fusions)", "SNV, Indels, CNAs: gene; Fusion(s): gene_a",
+     "previous HGNC symbols replaced by the current symbol (gene_symbol_map); vendor symbol kept in extra"),
     ("variants", "variant_type", "element: short-variant, copy-number-alteration, rearrangement",
      "item/type: snv, insertion, deletion, indel, delins, mnv -> short_variant; cnv-* -> cnv; fusion, "
      "splicing-variant -> rearrangement; expression -> expression",
@@ -108,7 +109,7 @@ ROWS = [
     ("variants", "cnv_type", "copy-number-alteration/@type (amplification / loss -> deletion)",
      "item/type (cnv-amplification -> amplification)", "'amplification' for called CNAs", "controlled"),
     ("variants", "other_gene", "rearrangement/@other-gene", "alterations/item/gene (second item)", "gene_b",
-     "fusion partner"),
+     "fusion partner; symbol harmonized as for gene"),
     ("variants", "in_frame", "rearrangement/@in-frame", "item/frame", NA, "yes / no / unknown"),
     ("variants", "supporting_read_pairs", "rearrangement/@supporting-read-pairs", NA, NA, "DNA evidence"),
     ("variants", "tpm", NA, "item/tpm (expression)", NA, ""),

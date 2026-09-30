@@ -25,7 +25,8 @@ What it does:
     record;
   * recomputes hgvs_p / hgvs_c and the Sequence Ontology functional_effect
     with the shared version-2 rules;
-  * reclassifies GenMineTOP RNA exon-skipping rows as rearrangements.
+  * reclassifies GenMineTOP RNA exon-skipping rows as rearrangements;
+  * replaces previous HGNC gene symbols by current ones (vendor symbol kept in extra).
 """
 
 from __future__ import annotations
@@ -198,6 +199,7 @@ def migrate(db_path: str, backup: bool = True) -> Dict[str, int]:
                               "functional_effect_source"):
                         row[k] = sv[k]
                     row["functional_effect_raw"] = oc.clean_str(old_fe) or oc.clean_str(sub)
+                oc.harmonize_gene_symbols([row])
                 cols = ["case_id"] + list(row)
                 new.execute(f"INSERT INTO variants ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                             [c["case_id"]] + list(row.values()))

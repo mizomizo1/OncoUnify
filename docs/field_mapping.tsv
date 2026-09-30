@@ -27,7 +27,7 @@ cases	source_sha256	loader	loader	loader	provenance
 cases	format_version	xsd names of ResultsReport and variant-report; @pipeline-version	vendor-id and root/version	sheet names present	provenance; unknown versions raise a warning
 cases	loader	loader	loader	loader	provenance
 cases	loaded_at	loader	loader	loader	provenance
-variants	gene	short-variant/@gene; copy-number-alteration/@gene; rearrangement/@targeted-gene	alterations/item/gene (first item for fusions)	SNV, Indels, CNAs: gene; Fusion(s): gene_a	
+variants	gene	short-variant/@gene; copy-number-alteration/@gene; rearrangement/@targeted-gene	alterations/item/gene (first item for fusions)	SNV, Indels, CNAs: gene; Fusion(s): gene_a	previous HGNC symbols replaced by the current symbol (gene_symbol_map); vendor symbol kept in extra
 variants	variant_type	element: short-variant, copy-number-alteration, rearrangement	item/type: snv, insertion, deletion, indel, delins, mnv -> short_variant; cnv-* -> cnv; fusion, splicing-variant -> rearrangement; expression -> expression	sheet: SNV, Indels -> short_variant; CNAs -> cnv; Fusion(s) -> rearrangement	controlled
 variants	variant_subtype	short-variant/@functional-effect; copy-number-alteration/@type; rearrangement/@type	item/type	'SNV'; Indels: type; 'CNA'; 'fusion'	verbatim
 variants	chrom	@position / @pos1 (chr part)	item/locus; fusion: breakpoint/item[1]/chr	chrom (prefixed with chr); Fusion(s): chrom_a	UCSC style
@@ -54,7 +54,7 @@ variants	depth	short-variant/@depth	denominator of item/allele-frequency	—
 variants	copy_number	copy-number-alteration/@copy-number	item/num-copy	CNAs: copy_number	vendor-native; not harmonized
 variants	cnv_ratio	copy-number-alteration/@ratio	item/ratio	—	vendor-native
 variants	cnv_type	copy-number-alteration/@type (amplification / loss -> deletion)	item/type (cnv-amplification -> amplification)	'amplification' for called CNAs	controlled
-variants	other_gene	rearrangement/@other-gene	alterations/item/gene (second item)	gene_b	fusion partner
+variants	other_gene	rearrangement/@other-gene	alterations/item/gene (second item)	gene_b	fusion partner; symbol harmonized as for gene
 variants	in_frame	rearrangement/@in-frame	item/frame	—	yes / no / unknown
 variants	supporting_read_pairs	rearrangement/@supporting-read-pairs	—	—	DNA evidence
 variants	tpm	—	item/tpm (expression)	—	
