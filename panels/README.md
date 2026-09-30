@@ -9,6 +9,11 @@ them with:
 python3 load_panel_genes.py panels.db panels/
 ```
 
+The synthetic lists in `tests/data/panels/` (description marked SYNTHETIC)
+are for the tests and the demo only; the loader refuses them unless
+`--allow-synthetic` is given.  `tools/qc_report.py` lists the gene lists
+loaded in a database.
+
 ## File format
 
 ```

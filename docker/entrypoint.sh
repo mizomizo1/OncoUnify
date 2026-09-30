@@ -7,7 +7,7 @@ cd /opt/oncounify
 
 if [ "${ONCOUNIFY_DEMO:-0}" = "1" ] && [ ! -s "$DB" ]; then
     echo "[oncounify] building the demo database from the synthetic fixtures"
-    ONCOUNIFY_REPORTS=/opt/oncounify/tests/data ./docker/load_reports.sh \
+    ONCOUNIFY_REPORTS=/opt/oncounify/tests/data ONCOUNIFY_SYNTHETIC_PANELS=1 ./docker/load_reports.sh \
         || echo "[oncounify] WARNING: the demo load reported failures"
 fi
 

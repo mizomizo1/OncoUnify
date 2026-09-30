@@ -17,7 +17,8 @@ if [ -d "$R/foundation" ]; then python3 load_foundation.py "$DB" "$R/foundation"
 if [ -d "$R/genminetop" ]; then python3 load_genminetop.py "$DB" "$R/genminetop" "$@" --quiet || status=1; fi
 if [ -d "$R/guardant" ];   then python3 load_guardant.py   "$DB" "$R/guardant"   "$@" --quiet || status=1; fi
 if [ -d "$R/panels" ]; then
-    python3 load_panel_genes.py "$DB" "$R/panels" || status=1
+    if [ "${ONCOUNIFY_SYNTHETIC_PANELS:-0}" = "1" ]; then synth=--allow-synthetic; else synth=; fi
+    python3 load_panel_genes.py "$DB" "$R/panels" $synth || status=1
 elif ls panels/*.tsv >/dev/null 2>&1; then
     python3 load_panel_genes.py "$DB" panels || status=1
 fi

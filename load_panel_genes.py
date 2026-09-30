@@ -92,6 +92,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog=LOADER, description="Load assay gene lists (panel content).")
     ap.add_argument("db")
     ap.add_argument("inputs", nargs="+", help="TSV files or directories containing *.tsv")
+    ap.add_argument("--allow-synthetic", action="store_true",
+                    help="also load lists marked SYNTHETIC (tests/data/panels; tests and demos only)")
     args = ap.parse_args(argv)
 
     files = oc.iter_input_files(args.inputs, (".tsv",))
@@ -104,6 +106,10 @@ def main(argv=None) -> int:
     for path in files:
         try:
             meta, rows = parse_panel_file(path)
+            synthetic = "SYNTHETIC" in (meta.get("description") or "").upper()
+            if synthetic and not args.allow_synthetic:
+                raise ValueError("SYNTHETIC test list, not the vendor's assay content: not loaded. The official "
+                                 "lists are in panels/ (use --allow-synthetic only for tests and demos)")
             with conn:
                 conn.execute(
                     "INSERT INTO panel_versions (panel_name, panel_version, description, source) VALUES (?, ?, ?, ?) "
@@ -123,9 +129,9 @@ def main(argv=None) -> int:
                 )
             print(f"[INFO] {meta['panel_name']} / {meta['panel_version']}: {len(rows)} genes <- {path}",
                   file=sys.stderr)
-            if "SYNTHETIC" in (meta.get("description") or "").upper():
-                print(f"[WARNING] {path.name} is a SYNTHETIC test list, not the vendor's assay content; "
-                      "for real reports load panels/", file=sys.stderr)
+            if synthetic:
+                print(f"[WARNING] {path.name} is a SYNTHETIC test list, not the vendor's assay content",
+                      file=sys.stderr)
         except Exception as exc:
             failed += 1
             print(f"[ERROR] {path}: {exc}", file=sys.stderr)

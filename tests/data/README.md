@@ -27,7 +27,7 @@ query "KRAS p.G12D, any vendor, diagnosis containing 'colon'".
 python3 load_foundation.py  /tmp/test.db tests/data/foundation --case-metadata tests/data/case_metadata.csv
 python3 load_genminetop.py  /tmp/test.db tests/data/genminetop --case-metadata tests/data/case_metadata.csv
 python3 load_guardant.py    /tmp/test.db tests/data/guardant   --case-metadata tests/data/case_metadata.csv
-python3 load_panel_genes.py /tmp/test.db tests/data/panels
+python3 load_panel_genes.py /tmp/test.db tests/data/panels --allow-synthetic
 sqlite3 /tmp/test.db "SELECT panel_name, report_id, gene, hgvs_p FROM v_short_variants WHERE hgvs_p = 'p.G12D';"
 ```
 

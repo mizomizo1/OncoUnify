@@ -48,7 +48,7 @@ def load_all(db: Path, *extra):
     run(ROOT / "load_foundation.py", db, DATA / "foundation", "--case-metadata", SIDECAR, "--quiet", *extra)
     run(ROOT / "load_genminetop.py", db, DATA / "genminetop", "--case-metadata", SIDECAR, "--quiet", *extra)
     run(ROOT / "load_guardant.py", db, DATA / "guardant", "--case-metadata", SIDECAR, "--quiet", *extra)
-    run(ROOT / "load_panel_genes.py", db, DATA / "panels")
+    run(ROOT / "load_panel_genes.py", db, DATA / "panels", "--allow-synthetic")
 
 
 class Pipeline(unittest.TestCase):
@@ -236,6 +236,27 @@ class Pipeline(unittest.TestCase):
                              "WHERE short_variants = 1 GROUP BY gene"))
         self.assertEqual(tested["TP53"], 7)
         self.assertEqual(tested["SMAD4"], 4)   # not in the synthetic Guardant / FoundationOne Liquid lists
+
+
+class GeneLists(unittest.TestCase):
+    """Official lists load; synthetic test lists are refused unless explicitly allowed."""
+
+    def test_official_and_synthetic_lists(self):
+        tmp = Path(tempfile.mkdtemp(prefix="oncounify-panels-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        db = tmp / "p.db"
+        p = run(ROOT / "load_panel_genes.py", db, DATA / "panels", check=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("SYNTHETIC", p.stderr)
+        conn = sqlite3.connect(db)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM panel_versions").fetchone()[0], 0)
+        run(ROOT / "load_panel_genes.py", db, ROOT / "panels")
+        counts = dict(conn.execute("SELECT pv.panel_name || ' / ' || pv.panel_version, SUM(pg.short_variants) "
+                                   "FROM panel_versions pv JOIN panel_genes pg USING(panel_version_id) GROUP BY 1"))
+        self.assertEqual(counts, {"FoundationOne / FoundationOneDx": 311, "FoundationOneLiquid / FoundationOneLiquidDx": 311,
+                                  "GenMineTOP / TDv1.1.0+TRv6.4.3": 737, "GenMineTOP / TDv6+TRv6": 737,
+                                  "Guardant / Guardant360 CDx": 74})
+        conn.close()
 
 
 class Migration(unittest.TestCase):
