@@ -14,8 +14,8 @@ Usage:
   identifiers, so report_id (and optionally patient_id) are taken from the
   file name with a configurable regular expression with named groups
   `report_id` and `patient_id`.  The default,
-      ^[^_]+_(?P<report_id>[^_]+)_(?P<patient_id>[^_]+)$
-  reads 'Interim_<report_id>_<patient_id>.xlsx'.  A file name that does not
+      ^[^_]+_(?P<patient_id>[^_]+)_(?P<report_id>[^_]+)$
+  reads 'Interim_<patient_id>_<report_id>.xlsx'.  A file name that does not
   match is reported as a failure; it is never loaded with guessed identifiers.
 * Sheets SNV, Indels and CNAs are required; Fusion (or Fusions) and MSI are
   optional.  Sheet and column names are matched case-insensitively.
@@ -42,7 +42,7 @@ import pandas as pd
 import oncounify_core as oc
 
 LOADER = "load_guardant.py"
-DEFAULT_PATTERN = r"^[^_]+_(?P<report_id>[^_]+)_(?P<patient_id>[^_]+)$"
+DEFAULT_PATTERN = r"^[^_]+_(?P<patient_id>[^_]+)_(?P<report_id>[^_]+)$"
 DEFAULT_BUILD = "GRCh37"
 
 REQUIRED_SHEETS = {

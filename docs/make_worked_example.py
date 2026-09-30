@@ -92,7 +92,7 @@ loading, the three rows share `hgvs_p = p.G12D` and the Sequence Ontology term
 
 {t_gm}
 
-## 3. Guardant360 CDx workbook (`Interim_SYN-G360-0001_SYNPT-0001.xlsx`, sheet `SNV`)
+## 3. Guardant360 CDx workbook (`Interim_SYNPT-0001_SYN-G360-0001.xlsx`, sheet `SNV`)
 
 | gene | chrom | position | mut_nt | mut_aa | cdna | percentage | call | transcript_id | exon | reporting_category |
 |---|---|---|---|---|---|---|---|---|---|---|

@@ -407,7 +407,7 @@ def write_guardant():
                 max_maf=0.0502, mean_maf=None)]
     qc = [dict(runid="SYNRUN_0001", run_sample_id="SYNSAMPLE01", category="sample", metric="coverage",
                verbose_name="Coverage", unit="families", value=2100, status="PASS")]
-    write_book(d / "Interim_SYN-G360-0001_SYNPT-0001.xlsx", {
+    write_book(d / "Interim_SYNPT-0001_SYN-G360-0001.xlsx", {
         "SNV": (SNV_COLS, snv), "Indels": (INDEL_COLS, indels), "CNAs": (CNA_COLS, cnas),
         "Fusions": (FUSION_COLS, fusions), "MSI": (MSI_COLS, msi), "QC": (QC_COLS, qc)})
 
@@ -431,7 +431,7 @@ def write_guardant():
                      pos_a=42522656, pos_b=29446394, percentage=0.61, call=1)]
     msi2 = [dict(runid="SYNRUN_0002", run_sample_id="SYNSAMPLE02", msi_score=24, msi_status="MSI-High",
                  max_maf=0.084, mean_maf=None)]
-    write_book(d / "Interim_SYN-G360-0002_SYNPT-0004.xlsx", {
+    write_book(d / "Interim_SYNPT-0004_SYN-G360-0002.xlsx", {
         "SNV": (SNV_COLS, snv2), "Indels": (INDEL_COLS, indels2), "CNAs": (CNA_COLS, cnas2),
         "Fusion": (FUSION_COLS, fusions2), "MSI": (MSI_COLS, msi2)})
 
@@ -498,7 +498,7 @@ def write_misc():
     write_book(INVALID / "guardant" / "results.xlsx", {
         "SNV": (SNV_COLS, []), "Indels": (INDEL_COLS, []), "CNAs": (CNA_COLS, [])})
     # a workbook with the right name but a missing required sheet
-    write_book(INVALID / "guardant" / "Interim_SYN-BAD-0001_SYNPT-9999.xlsx", {"SNV": (SNV_COLS, [])})
+    write_book(INVALID / "guardant" / "Interim_SYNPT-9999_SYN-BAD-0001.xlsx", {"SNV": (SNV_COLS, [])})
 
 
 if __name__ == "__main__":
