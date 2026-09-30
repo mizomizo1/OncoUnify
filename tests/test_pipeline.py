@@ -238,6 +238,23 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(tested["SMAD4"], 4)   # not in the synthetic Guardant / FoundationOne Liquid lists
 
 
+class ScaleBenchmark(unittest.TestCase):
+    """reviewer 1, M8: the scaling benchmark generates, loads and times a synthetic registry."""
+
+    def test_small_run(self):
+        tmp = Path(tempfile.mkdtemp(prefix="oncounify-scale-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        out = tmp / "r.json"
+        run(ROOT / "tools" / "scale_benchmark.py", "--sizes", "20", "--workdir", tmp / "w", "--json", out)
+        r = json.loads(out.read_text())["sizes"][0]
+        self.assertEqual(r["rows"]["cases"], 20)
+        self.assertGreater(r["rows"]["variants"], 150)
+        self.assertEqual(set(r["sql_median_ms"]), {
+            "recruitment (KRAS p.G12D, disease ~ colon, per patient)",
+            "longitudinal (all variants of the most-tested patient)",
+            "institutional (panel-aware gene frequencies, all reports)"})
+
+
 class GeneLists(unittest.TestCase):
     """Official lists load; synthetic test lists are refused unless explicitly allowed."""
 

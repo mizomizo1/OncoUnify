@@ -39,6 +39,9 @@ reports or upgraded with `migrate_db.py`.
   `--genome-build`, `--case-metadata`; Guardant `--filename-pattern`
   (no silent fallback), `--panel-version`, `--include-uncalled`.
 - `load_panel_genes.py` (assay content), `migrate_db.py` (1.x upgrade).
+- `tools/qc_report.py` (registry quality report and benchmark of the use-case
+  queries) and `tools/scale_benchmark.py` (synthetic registries of 10^2-10^4
+  reports loaded and queried; results in `docs/BENCHMARK.md`).
 
 ### Web interface
 - Configuration through environment variables (`ONCOUNIFY_DB`, …).

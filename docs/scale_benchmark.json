@@ -1,0 +1,95 @@
+{
+  "machine": "Apple M4, 32 GB, macOS 15.5",
+  "python": "3.9.6",
+  "sqlite": "3.43.2",
+  "seed": 20260930,
+  "sizes": [
+    {
+      "reports": 100,
+      "reports_by_kind": {
+        "F1": 73,
+        "F1L": 7,
+        "GM": 7,
+        "G360": 13
+      },
+      "patients": 76,
+      "patients_with_2_or_more_reports": 14,
+      "load_seconds": 1.0,
+      "database_mb": 0.9,
+      "rows": {
+        "cases": 100,
+        "variants": 1453,
+        "biomarkers": 180,
+        "panel_genes": 2942
+      },
+      "sql_median_ms": {
+        "recruitment (KRAS p.G12D, disease ~ colon, per patient)": 0.032,
+        "longitudinal (all variants of the most-tested patient)": 0.029,
+        "institutional (panel-aware gene frequencies, all reports)": 8.672
+      },
+      "cgi_median_ms": {
+        "recruitment": 23.73,
+        "longitudinal": 23.546,
+        "institutional": 29.003
+      }
+    },
+    {
+      "reports": 1000,
+      "reports_by_kind": {
+        "F1": 733,
+        "G360": 128,
+        "GM": 67,
+        "F1L": 72
+      },
+      "patients": 814,
+      "patients_with_2_or_more_reports": 158,
+      "load_seconds": 5.7,
+      "database_mb": 6.6,
+      "rows": {
+        "cases": 1000,
+        "variants": 14135,
+        "biomarkers": 1805,
+        "panel_genes": 2942
+      },
+      "sql_median_ms": {
+        "recruitment (KRAS p.G12D, disease ~ colon, per patient)": 0.303,
+        "longitudinal (all variants of the most-tested patient)": 0.02,
+        "institutional (panel-aware gene frequencies, all reports)": 88.091
+      },
+      "cgi_median_ms": {
+        "recruitment": 26.891,
+        "longitudinal": 24.764,
+        "institutional": 89.058
+      }
+    },
+    {
+      "reports": 10000,
+      "reports_by_kind": {
+        "F1": 7333,
+        "GM": 667,
+        "F1L": 725,
+        "G360": 1275
+      },
+      "patients": 7983,
+      "patients_with_2_or_more_reports": 1616,
+      "load_seconds": 61.7,
+      "database_mb": 63.9,
+      "rows": {
+        "cases": 10000,
+        "variants": 142013,
+        "biomarkers": 18058,
+        "panel_genes": 2942
+      },
+      "sql_median_ms": {
+        "recruitment (KRAS p.G12D, disease ~ colon, per patient)": 8.911,
+        "longitudinal (all variants of the most-tested patient)": 0.044,
+        "institutional (panel-aware gene frequencies, all reports)": 1138.38
+      },
+      "cgi_median_ms": {
+        "recruitment": 41.7,
+        "longitudinal": 27.233,
+        "institutional": 880.525
+      }
+    }
+  ]
+}

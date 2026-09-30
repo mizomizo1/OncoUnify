@@ -87,7 +87,8 @@ OncoUnify/
 ├── panels/                 official assay gene lists (see panels/README.md)
 ├── tools/qc_report.py      registry quality report (incl. consequence-inference check)
 ├── tools/make_symbol_map.py  regenerates gene_symbol_map.tsv from the HGNC complete set
-├── docs/                   INSTALL, SCHEMA, LOADER_DEV, CURATION, field_mapping.tsv, WORKED_EXAMPLE
+├── tools/scale_benchmark.py  loads and queries synthetic registries of 10^2-10^4 reports
+├── docs/                   INSTALL, SCHEMA, LOADER_DEV, CURATION, field_mapping.tsv, WORKED_EXAMPLE, BENCHMARK
 ├── docker/, Dockerfile, docker-compose.yml
 └── tests/                  synthetic fixtures, fixture generator, unit and end-to-end tests
 ```
