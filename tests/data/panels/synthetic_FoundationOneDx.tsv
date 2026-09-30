@@ -1,0 +1,26 @@
+# panel_name: FoundationOne
+# panel_version: FoundationOneDx
+# description: SYNTHETIC gene list for tests - NOT the vendor's official assay content
+# source: tests/make_fixtures.py
+gene	short_variants	copy_number	rearrangements
+ALK	1	0	1
+APC	1	0	0
+AR	1	1	0
+ARID1A	1	0	0
+BRAF	1	0	0
+BRCA1	1	0	0
+BRCA2	1	0	0
+CDKN2A	1	1	0
+EGFR	1	1	1
+ERBB2	1	1	0
+FBXW7	1	0	0
+KRAS	1	0	0
+MET	1	1	1
+MYC	1	1	0
+NTRK1	1	0	1
+PIK3CA	1	0	0
+PTEN	1	0	0
+SMAD4	1	0	0
+STK11	1	0	0
+TERT	1	0	0
+TP53	1	0	0

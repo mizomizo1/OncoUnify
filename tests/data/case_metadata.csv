@@ -1,0 +1,8 @@
+panel_name,report_id,patient_id,disease,oncotree_code,tissue_of_origin,note
+FoundationOne,SYN-F1-0001,SYNPT-0001,,COAD,,MRN absent in the vendor file; linked by the curator
+FoundationOne,SYN-F1-0002,,,LUAD,,
+FoundationOneLiquid,SYN-F1L-0003,,,PRAD,,
+GenMineTOP,SYN-GM-0001,,Colon adenocarcinoma,COAD,Colon,
+GenMineTOP,SYN-GM-0002,,Lung adenocarcinoma,LUAD,Lung,
+Guardant,SYN-G360-0001,,Colon adenocarcinoma,COAD,Colon,disease is not part of the Guardant deliverable
+Guardant,SYN-G360-0002,,Lung adenocarcinoma,LUAD,Lung,

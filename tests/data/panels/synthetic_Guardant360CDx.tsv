@@ -1,0 +1,20 @@
+# panel_name: Guardant
+# panel_version: Guardant360 CDx
+# description: SYNTHETIC gene list for tests - NOT the vendor's official assay content
+# source: tests/make_fixtures.py
+gene	short_variants	copy_number	rearrangements
+ALK	1	0	1
+APC	1	0	0
+AR	1	0	0
+ARID1A	1	0	0
+BRAF	1	0	0
+BRCA1	1	0	0
+BRCA2	1	0	0
+EGFR	1	0	0
+ERBB2	1	1	0
+KRAS	1	0	0
+MET	1	1	0
+NTRK1	1	0	1
+PIK3CA	1	0	0
+PTEN	1	0	0
+TP53	1	0	0

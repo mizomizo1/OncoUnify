@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rr:ResultsReport xmlns:rr="http://integration.foundationmedicine.com/reporting" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://integration.foundationmedicine.com/reporting http://integration.foundationmedicine.com/reporting/ResultsReport.2.1.xsd">
+    <rr:CustomerInformation>
+        <rr:ReferenceID>SYN-F1-0001</rr:ReferenceID>
+        <rr:CSN/>
+        <rr:TRF>ORD-SYN-0001-01</rr:TRF>
+        <rr:MRN/>
+        <rr:PhysicianId/>
+        <rr:NPI/>
+    </rr:CustomerInformation>
+    <rr:ResultsPayload>
+        <variant-report xmlns="http://foundationmedicine.com/compbio/variant-report-external" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://foundationmedicine.com/compbio/variant-report-external http://integration.foundationmedicine.com/reporting/variant-report-external-2.2.xsd" disease="COLON" disease-ontology="Colon adenocarcinoma (CRC)" flowcell-analysis="9000000001" gender="female" pathology-diagnosis="Colon adenocarcinoma (CRC)" percent-tumor-nuclei="40" pipeline-version="v3.29.0" purity-assessment="38.50" specimen="ORD-SYN-0001-01*SYN0000001.01" study="Synthetic F1CDx" test-request="ORD-SYN-0001-01" test-type="FoundationOneDx" tissue-of-origin="Colon">
+            <samples>
+                <sample bait-set="DX2" mean-exon-depth="812.40" name="SQ-SYN0000001-1" nucleic-acid-type="DNA"/>
+            </samples>
+            <quality-control status="Pass"/>
+            <short-variants>
+                <short-variant allele-fraction="0.3120" cds-effect="35G&gt;A" depth="812" equivocal="false" functional-effect="missense" gene="KRAS" percent-reads="31.20" position="chr12:25398284" protein-effect="G12D" status="known" strand="-" transcript="NM_004985">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.4410" cds-effect="4348C&gt;T" depth="690" equivocal="false" functional-effect="nonsense" gene="APC" percent-reads="44.10" position="chr5:112175639" protein-effect="R1450*" status="known" strand="+" transcript="NM_000038">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.5230" cds-effect="524G&gt;A" depth="745" equivocal="false" functional-effect="missense" gene="TP53" percent-reads="52.30" position="chr17:7578406" protein-effect="R175H" status="known" strand="-" transcript="NM_000546">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.2870" cds-effect="904+1G&gt;A" depth="603" equivocal="false" functional-effect="splice" gene="SMAD4" percent-reads="28.70" position="chr18:48586290" protein-effect="splice site 904+1G&gt;A" status="likely" strand="+" transcript="NM_005359">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.2210" cds-effect="-124C&gt;T" depth="402" equivocal="false" functional-effect="promoter" gene="TERT" percent-reads="22.10" position="chr5:1295228" protein-effect="promoter -124C&gt;T" status="likely" strand="-" transcript="NM_198253">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.1850" cds-effect="1394G&gt;A" depth="588" equivocal="false" functional-effect="missense" gene="FBXW7" percent-reads="18.50" position="chr4:153249384" protein-effect="R465H" status="known" strand="-" transcript="NM_033632">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </short-variant>
+            </short-variants>
+            <copy-number-alterations>
+                <copy-number-alteration copy-number="11" equivocal="false" gene="MYC" number-of-exons="3 of 3" position="chr8:128748315-128753680" ratio="2.41" status="known" type="amplification">
+                    <dna-evidence sample="SQ-SYN0000001-1"/>
+                </copy-number-alteration>
+            </copy-number-alterations>
+            <rearrangements>
+            </rearrangements>
+            <biomarkers>
+                <microsatellite-instability status="MSS"/>
+                <tumor-mutation-burden score="6.30" status="low" unit="mutations-per-megabase"/>
+            </biomarkers>
+            <non-human-content/>
+        </variant-report>
+    </rr:ResultsPayload>
+</rr:ResultsReport>

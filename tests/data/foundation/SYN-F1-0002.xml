@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rr:ResultsReport xmlns:rr="http://integration.foundationmedicine.com/reporting" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://integration.foundationmedicine.com/reporting http://integration.foundationmedicine.com/reporting/ResultsReport.2.1.xsd">
+    <rr:CustomerInformation>
+        <rr:ReferenceID>SYN-F1-0002</rr:ReferenceID>
+        <rr:CSN/>
+        <rr:TRF>ORD-SYN-0002-01</rr:TRF>
+        <rr:MRN>SYNPT-0003</rr:MRN>
+        <rr:PhysicianId/>
+        <rr:NPI/>
+    </rr:CustomerInformation>
+    <rr:ResultsPayload>
+        <variant-report xmlns="http://foundationmedicine.com/compbio/variant-report-external" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://foundationmedicine.com/compbio/variant-report-external http://integration.foundationmedicine.com/reporting/variant-report-external-2.2.xsd" disease="LUNG" disease-ontology="Lung adenocarcinoma" flowcell-analysis="9000000002" gender="male" pathology-diagnosis="Lung adenocarcinoma" percent-tumor-nuclei="60" pipeline-version="v3.29.0" purity-assessment="55.10" specimen="ORD-SYN-0002-01*SYN0000002.01" study="Synthetic F1CDx" test-request="ORD-SYN-0002-01" test-type="FoundationOneDx" tissue-of-origin="Lung">
+            <samples>
+                <sample bait-set="DX2" mean-exon-depth="812.40" name="SQ-SYN0000002-1" nucleic-acid-type="DNA"/>
+            </samples>
+            <quality-control status="Pass"/>
+            <short-variants>
+                <short-variant allele-fraction="0.3380" cds-effect="2235_2249delGGAATTAAGAGAAGC" depth="921" equivocal="false" functional-effect="nonframeshift" gene="EGFR" percent-reads="33.80" position="chr7:55242465" protein-effect="E746_A750del" status="known" strand="+" transcript="NM_005228">
+                    <dna-evidence sample="SQ-SYN0000002-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.4050" cds-effect="818G&gt;A" depth="733" equivocal="false" functional-effect="missense" gene="TP53" percent-reads="40.50" position="chr17:7577120" protein-effect="R273H" status="known" strand="-" transcript="NM_000546">
+                    <dna-evidence sample="SQ-SYN0000002-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.1120" cds-effect="580G&gt;T" depth="510" equivocal="false" functional-effect="missense" gene="STK11" percent-reads="11.20" position="chr19:1220676" protein-effect="D194Y" status="unknown" strand="+" transcript="NM_000455">
+                    <dna-evidence sample="SQ-SYN0000002-1"/>
+                </short-variant>
+            </short-variants>
+            <copy-number-alterations>
+                <copy-number-alteration copy-number="0" equivocal="false" gene="CDKN2A" number-of-exons="3 of 3" position="chr9:21967751-21995300" ratio="0.12" status="known" type="loss">
+                    <dna-evidence sample="SQ-SYN0000002-1"/>
+                </copy-number-alteration>
+            </copy-number-alterations>
+            <rearrangements>
+                <rearrangement allele-fraction="0.2140" description="EML4(NM_019063)-ALK(NM_004304) fusion (E13;A20)" equivocal="false" in-frame="Yes" other-gene="ALK" percent-reads="21.40" pos1="chr2:42522656" pos2="chr2:29446394" status="known" supporting-read-pairs="118" targeted-gene="EML4" type="fusion">
+                    <dna-evidence sample="SQ-SYN0000002-1"/>
+                </rearrangement>
+            </rearrangements>
+            <biomarkers>
+                <microsatellite-instability status="MSS"/>
+                <tumor-mutation-burden score="4.10" status="low" unit="mutations-per-megabase"/>
+            </biomarkers>
+            <non-human-content/>
+        </variant-report>
+    </rr:ResultsPayload>
+</rr:ResultsReport>

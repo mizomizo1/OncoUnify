@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rr:ResultsReport xmlns:rr="http://integration.foundationmedicine.com/reporting" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://integration.foundationmedicine.com/reporting http://integration.foundationmedicine.com/reporting/ResultsReport.2.1.xsd">
+    <rr:CustomerInformation>
+        <rr:ReferenceID>SYN-F1L-0003</rr:ReferenceID>
+        <rr:CSN/>
+        <rr:TRF>ORD-SYN-0003-01</rr:TRF>
+        <rr:MRN>SYNPT-0005</rr:MRN>
+        <rr:PhysicianId/>
+        <rr:NPI/>
+    </rr:CustomerInformation>
+    <rr:ResultsPayload>
+        <variant-report xmlns="http://foundationmedicine.com/compbio/variant-report-external" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://foundationmedicine.com/compbio/variant-report-external http://integration.foundationmedicine.com/reporting/variant-report-external-2.2.xsd" disease="PROSTATE" disease-ontology="Prostate acinar adenocarcinoma" flowcell-analysis="9000000003" gender="male" non-human-content="0.0035" pathology-diagnosis="Prostate acinar adenocarcinoma" pipeline-version="v3.8.2" specimen="ORD-SYN-0003-01*SYN0000003.01" study="Synthetic F1LCDx" test-request="ORD-SYN-0003-01" test-type="FoundationOneLiquidDx" tissue-of-origin="Prostate">
+            <samples>
+                <sample bait-set="DX2" mean-exon-depth="812.40" name="SQ-SYN0000003-1" nucleic-acid-type="DNA"/>
+            </samples>
+            <quality-control status="Pass"/>
+            <short-variants>
+                <short-variant allele-fraction="0.0480" cds-effect="5946delT" depth="4120" equivocal="false" functional-effect="frameshift" gene="BRCA2" percent-reads="4.80" position="chr13:32914438" protein-effect="S1982fs*22" status="likely" strand="+" transcript="NM_000059">
+                    <dna-evidence sample="SQ-SYN0000003-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.0310" cds-effect="4636C&gt;T" depth="3980" equivocal="false" functional-effect="nonsense" gene="ARID1A" percent-reads="3.10" position="chr1:27100181" protein-effect="R1546*" status="likely" strand="+" transcript="NM_006015">
+                    <dna-evidence sample="SQ-SYN0000003-1"/>
+                </short-variant>
+                <short-variant allele-fraction="0.0270" cds-effect="672+1G&gt;A" depth="4400" equivocal="false" functional-effect="splice" gene="TP53" percent-reads="2.70" position="chr17:7578176" protein-effect="splice site 672+1G&gt;A" status="likely" strand="-" transcript="NM_000546">
+                    <dna-evidence sample="SQ-SYN0000003-1"/>
+                </short-variant>
+            </short-variants>
+            <copy-number-alterations>
+                <copy-number-alteration copy-number="14" equivocal="false" gene="AR" number-of-exons="8 of 8" position="chrX:66764465-66950461" ratio="3.02" status="known" type="amplification">
+                    <dna-evidence sample="SQ-SYN0000003-1"/>
+                </copy-number-alteration>
+            </copy-number-alterations>
+            <rearrangements>
+            </rearrangements>
+            <biomarkers>
+                <microsatellite-instability status="MSS"/>
+                <tumor-mutation-burden score="7.58" status="low" unit="mutations-per-megabase"/>
+            </biomarkers>
+            <non-human-content>
+                <non-human organism="HPV-16" reads-per-million="31" status="unknown">
+                    <dna-evidence sample="SQ-SYN0000003-1"/>
+                </non-human>
+                <non-human organism="HHV-4" reads-per-million="12" status="unknown">
+                    <dna-evidence sample="SQ-SYN0000003-1"/>
+                </non-human>
+            </non-human-content>
+        </variant-report>
+    </rr:ResultsPayload>
+</rr:ResultsReport>

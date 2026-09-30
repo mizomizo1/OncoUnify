@@ -19,6 +19,6 @@ venv/
 
 # Local, non-shareable inputs. Real vendor reports must never be placed
 # inside this repository; keep them outside the working tree.
-private/
+/private/
 tests/data_private/
-data/
+/data/
