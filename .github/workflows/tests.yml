@@ -1,0 +1,44 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-and-end-to-end:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Perl modules for the CGI tests
+        run: sudo apt-get update && sudo apt-get install -y libcgi-pm-perl libdbi-perl libdbd-sqlite3-perl
+      - name: Python dependencies
+        run: pip install pandas openpyxl
+      - name: Fixtures are reproducible
+        run: |
+          python tests/make_fixtures.py
+          git diff --exit-code -- tests/data tests/data_invalid ':!*.xlsx'
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+
+  docker-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t oncounify:ci .
+      - name: Start the demo and query it
+        run: |
+          docker run -d --name ou -e ONCOUNIFY_DEMO=1 -p 8080:80 oncounify:ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:8080/panel/search.html >/dev/null && break; sleep 2; done
+          curl -fsS "http://localhost:8080/cgi-bin/panel_search.cgi?gene=KRAS&protein_effect=G12D&disease=colon&view_mode=case&download=tsv" | tee result.tsv
+          test "$(grep -c SYN- result.tsv)" -eq 3
+          curl -fsS "http://localhost:8080/cgi-bin/panel_stats.cgi" | grep -q "n_mutated"
+      - name: Container log
+        if: always()
+        run: docker logs ou

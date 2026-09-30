@@ -117,6 +117,17 @@ class Consequence(unittest.TestCase):
         self.assertEqual(db, code)
 
 
+class Documentation(unittest.TestCase):
+    def test_field_mapping_covers_every_canonical_column(self):
+        rows = (ROOT / "docs" / "field_mapping.tsv").read_text(encoding="utf-8").splitlines()[1:]
+        listed = {tuple(r.split("\t")[:2]) for r in rows if r}
+        expected = ({("cases", c) for c in oc.CASE_COLUMNS} | {("variants", c) for c in oc.VARIANT_COLUMNS}
+                    | {("biomarkers", c) for c in oc.BIOMARKER_COLUMNS}
+                    | {("non_human_contents", c) for c in oc.NON_HUMAN_COLUMNS})
+        self.assertEqual(expected - listed, set(), "columns missing from docs/field_mapping.tsv")
+        self.assertEqual(listed - expected, set(), "docs/field_mapping.tsv lists unknown columns")
+
+
 class ControlledVocabularies(unittest.TestCase):
     def test_msi(self):
         self.assertEqual(oc.normalize_msi_call("MSI-H"), "MSI-H")

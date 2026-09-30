@@ -1,142 +1,98 @@
-# OncoUnify — Writing a new loader
+# OncoUnify — writing a loader for a new assay
 
-OncoUnify is designed so that supporting a new cancer-panel vendor never
-requires touching the schema, the CGIs, or the search interface. The entire
-vendor-specific logic lives in a single Python script, `load_<vendor>.py`.
+A loader is a small Python script that turns one vendor file into canonical
+Python dictionaries.  Everything else — normalization of protein and coding
+notation, Sequence Ontology classification, controlled vocabularies,
+transactional replacement, the curation sidecar, command-line options,
+summary and exit codes — is provided by `oncounify_core` and is therefore
+identical for every assay.
 
-This document explains the contract a new loader must satisfy.
+## 1. Minimal skeleton
 
----
+```python
+#!/usr/bin/env python3
+from __future__ import annotations
+import sys
+from pathlib import Path
+import oncounify_core as oc
 
-## 1. The contract
+LOADER = "load_myvendor.py"
 
-A loader is any executable Python script that, given:
+def parse_myvendor(path: Path, args) -> oc.ParsedReport:
+    rec = read_the_vendor_file(path)            # your parser
+    if rec is None:
+        raise oc.LoaderFormatError("not a MyVendor report")   # the file is reported as failed
 
-- a path to a SQLite database (created from `schema.sql`), and
-- a path to a directory containing native vendor deliverables,
+    case = {
+        "panel_name": "MyPanel",
+        "panel_version": rec.assay_version,     # must match panels/<...>.tsv
+        "panel_type": rec.assay_version,
+        "vendor": "MyVendor Inc.",
+        "report_id": rec.report_id,             # required
+        "patient_id": rec.patient_id,
+        "genome_build": oc.normalize_genome_build(rec.build) if rec.build else "GRCh38",
+        "genome_build_source": "vendor-file" if rec.build else "loader-default",
+        "other_info": oc.to_json({"anything": rec.extra_field}),
+        **oc.provenance(path, LOADER, f"MyVendor format {rec.format_version}"),
+    }
+    variants = []
+    for sv in rec.short_variants:
+        variants.append(oc.short_variant(       # derives hgvs_p, hgvs_c and the SO term
+            gene=sv.gene, protein=sv.protein, cds=sv.cds,
+            vendor_term=sv.consequence,         # vendor category, if the format has one
+            chrom=oc.normalize_chrom(sv.chrom), pos=sv.pos, ref=sv.ref, alt=sv.alt,
+            transcript=sv.transcript, allele_fraction=sv.vaf, status=sv.status,
+            raw_panel_type="short-variant",
+            extra=oc.to_json({"vendor_field": sv.something}),
+        ))
+    for cn in rec.copy_number:
+        variants.append({"gene": cn.gene, "variant_type": "cnv", "variant_subtype": cn.kind,
+                         "cnv_type": oc.normalize_cnv_type(cn.kind), "copy_number": cn.cn})
+    biomarkers = [{"name": "TMB", "value": rec.tmb, "unit": "mutations/Mb",
+                   "call": oc.normalize_tmb_call(rec.tmb_call), "call_raw": rec.tmb_call,
+                   "assay": "MyPanel tissue TMB", "source_field": "tmb"}]
+    return oc.ParsedReport(case, variants, [], biomarkers, warnings=[])
 
-inserts one row into `cases` for every report and zero or more rows into
-`variants` (and optionally `non_human_contents`) for every reported finding.
+def main(argv=None) -> int:
+    parser = oc.base_argument_parser(LOADER, "Load MyVendor reports.")
+    return oc.run_loader(prog=LOADER, parser=parser, suffixes=(".json",),
+                         parse_file=parse_myvendor, argv=argv)
 
-Loaders are independent processes. They share **only** the schema and the
-unique key `(panel_name, report_id)`. Two loaders never block each other.
-
----
-
-## 2. Required helper functions
-
-Every loader in this repository exposes four helpers, in this order:
-
-| Function | Responsibility |
-|---|---|
-| `init_db(conn, schema_path)` | Idempotently execute `schema.sql` on the connection. |
-| `get_or_create_case(conn, case)` | Return an existing `case_id` for `(panel_name, report_id)`, or insert and return a new one. |
-| `insert_variants(conn, case_id, variants)` | Bulk-insert variant rows. |
-| `parse_<vendor>(path)` | Parse a single native deliverable and return `(case_dict, variants_list[, non_humans_list])`. |
-
-You can copy the helpers verbatim from `load_foundation.py`; only
-`parse_<vendor>()` is vendor-specific.
-
----
-
-## 3. Canonical column mapping
-
-The full canonical schema is documented in [SCHEMA.md](SCHEMA.md). A loader
-must map vendor fields onto canonical columns wherever a sensible mapping
-exists. Fields that have no counterpart in the canonical schema should be
-stored verbatim in `cases.other_info` or `variants.extra` as a serialised
-`key=value;...` string, **not** dropped silently.
-
-The minimum required population per row:
-
-### `cases`
-
-| Column | Required | Notes |
-|---|---|---|
-| `panel_name` | yes | Stable vendor + assay identifier (e.g., `FoundationOne`, `GenMineTOP`, `Guardant360`) |
-| `vendor` | yes | Manufacturer name |
-| `report_id` | yes | Unique within `panel_name` |
-| `patient_id` | recommended | Institutional MRN or pseudonym |
-| `date` | recommended | YYYY-MM-DD |
-
-### `variants`
-
-| Column | Required | Notes |
-|---|---|---|
-| `case_id` | yes | From `get_or_create_case()` |
-| `gene` | yes | Official HGNC symbol when possible |
-| `variant_type` | yes | One of `short_variant`, `cnv`, `rearrangement`, `expression`, `biomarker` |
-| `protein_effect` | recommended | Normalised: leading `p.` stripped |
-| `functional_effect` | recommended | One of `missense`, `nonsense`, `frameshift`, `splice`, `synonymous` |
-
----
-
-## 4. Step-by-step recipe
-
-The fastest way to start a new loader is to copy one of the existing files
-and rewire the parser:
-
-```bash
-cp load_guardant.py load_yourvendor.py
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
-Then:
+`oncounify_core.replace_report` rejects unknown column names and invalid
+`variant_type` values, so typos fail loudly instead of being dropped.
 
-1. Rewrite `parse_<vendor>(path)` to return the canonical `(case, variants)`
-   pair. Keep everything else identical.
-2. Replace the file-iteration helper if the vendor's deliverable is not a
-   flat directory of files (e.g., a single ZIP containing one PDF per case).
-3. Add a test fixture under `tests/data/<vendor>/` and verify the loader
-   produces non-empty `cases` and `variants` rows when run against it.
-4. Add a row to the vendor-to-canonical mapping table in the manuscript /
-   `SCHEMA.md` so reviewers and downstream users can see exactly which
-   vendor field populates which canonical column.
+## 2. Mapping rules
 
----
+* Fill every canonical column the vendor can populate (see
+  [SCHEMA.md](SCHEMA.md)); put everything else into `other_info` / `extra`
+  with `oc.to_json(...)` — never drop a vendor field.
+* Keep vendor strings verbatim in `protein_effect` / `cds_effect`; let
+  `oc.short_variant()` derive `hgvs_p`, `hgvs_c` and `functional_effect`.
+  Pass the vendor's own consequence as `vendor_term`, or a coarse category
+  (e.g. "promoter", "utr") as `hint`.
+* Record the genome build.  Prefer the value stated in the file
+  (`genome_build_source = 'vendor-file'`); otherwise use the vendor's
+  documented assembly (`'loader-default'`) and say so in the loader
+  docstring.
+* Biomarkers go to `biomarkers` with unit and an `assay` label that is
+  unique to the measurement method.
+* Report a structural problem by raising `oc.LoaderFormatError`; add
+  non-fatal notes (e.g. an untested format version) to `warnings`.
+* Unknown alteration classes must produce a warning, not a silent skip.
 
-## 5. Idempotency and re-ingestion
+## 3. Checklist for a contribution
 
-Re-running a loader on the same input directory must not duplicate cases.
-The existing loaders rely on the `UNIQUE(panel_name, report_id)` constraint
-in the `cases` table; `get_or_create_case()` short-circuits when the pair
-is already present.
-
-If you need to **replace** an existing case (for example, because a vendor
-has issued an amended report), delete the case first:
-
-```sql
-DELETE FROM variants            WHERE case_id IN (SELECT case_id FROM cases WHERE panel_name='Foo' AND report_id='12345');
-DELETE FROM non_human_contents  WHERE case_id IN (SELECT case_id FROM cases WHERE panel_name='Foo' AND report_id='12345');
-DELETE FROM cases               WHERE panel_name='Foo' AND report_id='12345';
-```
-
-Then re-run the loader.
-
----
-
-## 6. Conventions
-
-- **Stdout is silent**, stderr carries human-readable progress messages.
-- Loaders should be runnable as `python3 load_<vendor>.py <db> <dir>` with
-  no other arguments. Extra options (e.g., a panel-name override) are fine,
-  but the two positional arguments must stay.
-- Loaders must **not** modify `journal_mode`. The CGI side assumes
-  `journal_mode=DELETE`.
-- Numeric coercion goes through `int_or_none()` / `float_or_none()`. Empty
-  strings, whitespace, and `"N/A"`-style sentinels must become SQL `NULL`,
-  not `0`.
-
----
-
-## 7. Submitting a new loader upstream
-
-When contributing a loader back to the project:
-
-1. Open a pull request that touches **only** `load_<vendor>.py`,
-   `tests/data/<vendor>/`, and `docs/SCHEMA.md` (the mapping table).
-2. Include at least one synthetic sample report under `tests/data/<vendor>/`
-   with all identifying information removed.
-3. Update the README's vendor list.
-
-Contributions are reviewed for: canonical mapping correctness, idempotency,
-and absence of vendor-proprietary information in the test fixtures.
+1. `load_<vendor>.py` built on `oncounify_core` as above.
+2. Synthetic fixtures in `tests/data/<vendor>/` (generated by
+   `tests/make_fixtures.py`; **no real report, identifier or date**), covering
+   every alteration class the vendor emits, plus at least one invalid file in
+   `tests/data_invalid/<vendor>/`.
+3. Tests in `tests/test_pipeline.py`: expected row counts, genome build,
+   consequences, biomarkers, re-run idempotency, failure on invalid input.
+4. Rows for the new vendor in `docs/make_field_mapping.py` (regenerate
+   `docs/field_mapping.tsv`), and the assay gene list in `panels/`.
+5. `python3 -m unittest discover -s tests` passes.

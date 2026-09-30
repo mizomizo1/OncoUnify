@@ -1,0 +1,13 @@
+# Demo instance populated with the synthetic fixtures:  docker compose up --build
+services:
+  oncounify:
+    build: .
+    image: oncounify:2.0
+    ports:
+      - "8080:80"
+    environment:
+      ONCOUNIFY_DEMO: "1"
+    volumes:
+      - oncounify-data:/data
+volumes:
+  oncounify-data:

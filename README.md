@@ -1,71 +1,114 @@
 # OncoUnify
 
-A deployable, vendor-agnostic database and web interface for the integrated
-re-use of multi-vendor cancer genomic panel reports.
+[![tests](https://github.com/mizomizo1/OncoUnify/actions/workflows/tests.yml/badge.svg)](https://github.com/mizomizo1/OncoUnify/actions/workflows/tests.yml)
 
-OncoUnify ingests reports produced by **FoundationOne / FoundationOneLiquid**
-(Foundation Medicine, XML), **GenMineTOP** (XML), and
-**Guardant360** (Excel `.xlsx`), normalises them into a single relational
-schema, and exposes them through a lightweight CGI-based web interface for
-cross-vendor search, per-case drill-down, and registry-level statistics.
+OncoUnify turns the heterogeneous deliverables of commercial cancer genomic
+panels into one normalized, queryable SQLite database that stays inside the
+institution.  It is bioinformatics infrastructure: installed once (by IT or a
+bioinformatician), run on a schedule, and queried by anyone with SQL, R,
+Python — or through the bundled reference web interface.
 
-The package is intentionally minimal — Python 3, Perl 5, SQLite, and Apache
-(or any other CGI-capable web server) are the only runtime dependencies — so
-that each institution can self-host an instance with the data kept on
-premises.
+| Vendor deliverable | Loader | Genome build |
+|---|---|---|
+| FoundationOne CDx / FoundationOne Liquid CDx (Foundation Medicine, XML) | `load_foundation.py` | GRCh37 (loader default) |
+| GenMineTOP Cancer Genome Profiling System (GenMine Labs, XML) | `load_genminetop.py` | read from the report (GRCh38) |
+| Guardant360 CDx (Guardant Health, Excel `.xlsx`) | `load_guardant.py` | GRCh37 (loader default) |
 
-## Quick start
+## What is normalized
+
+* **One report = one `cases` row** keyed by `(panel_name, report_id)`, with
+  the reference assembly (`genome_build`), assay version, provenance (source
+  file, SHA-256, loader version) and any vendor field without a canonical
+  home kept as JSON.
+* **Variants** of every class (SNV/indel, CNV, fusion/rearrangement/exon
+  skipping, expression) in one table with typed views.  Vendor strings are
+  stored verbatim; canonical keys sit next to them: `hgvs_p` (one-letter HGVS
+  protein key, e.g. `p.G12D` for `G12D`, `p.G12D`, `p.Gly12Asp`) and `hgvs_c`.
+* **Functional consequence** as a Sequence Ontology term (`missense_variant`,
+  `frameshift_variant`, `splice_acceptor_variant`, `inframe_deletion`, …),
+  assigned by one shared rule set in every loader, with the SO accession and
+  whether it came from the vendor or was inferred.
+* **Biomarkers** (TMB, MSI) in their own table with value, unit, controlled
+  call, verbatim call and assay — values of different assays are never pooled.
+* **Assay content** (gene lists) as data, so that cross-panel mutation
+  frequencies use the right denominator (`n_mutated / n_tested`).
+* **Curation**: a sidecar CSV supplies what vendor files lack (disease label,
+  OncoTree code, patient identifier linking reports of one patient).
+
+See [docs/SCHEMA.md](docs/SCHEMA.md) for the data dictionary and
+[docs/field_mapping.tsv](docs/field_mapping.tsv) for the complete
+vendor-to-canonical field mapping.
+
+## Quick start (Docker demo with synthetic data)
 
 ```bash
-# 1. Initialise the database and ingest reports
-python3 load_foundation.py  panels.db /path/to/foundation_xml_dir
-python3 load_genminetop.py  panels.db /path/to/genminetop_xml_dir
-python3 load_guardant.py    panels.db /path/to/guardant_xlsx_dir
-
-# 2. Deploy the CGIs and search.html behind a web server
-#    (see docs/INSTALL.md for an Apache + suEXEC example)
+git clone https://github.com/mizomizo1/OncoUnify.git
+cd OncoUnify
+docker compose up --build
+# open http://localhost:8080/  (demo database built from tests/data)
 ```
+
+## Quick start (command line)
+
+Python ≥ 3.9 with `pandas` and `openpyxl` (Guardant only):
+
+```bash
+python3 load_foundation.py  panels.db /reports/foundation  --case-metadata curation.csv
+python3 load_genminetop.py  panels.db /reports/genminetop  --case-metadata curation.csv
+python3 load_guardant.py    panels.db /reports/guardant    --case-metadata curation.csv
+python3 load_panel_genes.py panels.db panels/
+sqlite3 panels.db "SELECT panel_name, report_id, gene, hgvs_p, functional_effect
+                   FROM v_short_variants WHERE gene = 'KRAS' AND hgvs_p = 'p.G12D';"
+```
+
+Every loader replaces a report and its child rows in one transaction (re-runs
+never duplicate data), prints a per-run summary, and exits with status 1 if
+any input file failed — suitable for a nightly `cron` job.  To deploy the web
+interface on Apache see [docs/INSTALL.md](docs/INSTALL.md).  To upgrade a
+database created by OncoUnify 1.x run `python3 migrate_db.py panels.db`.
 
 ## Repository layout
 
 ```
 OncoUnify/
-├── schema.sql                  # canonical relational schema
-├── load_foundation.py          # FoundationOne / FoundationOneLiquid XML loader
-├── load_genminetop.py          # GenMineTOP XML loader
-├── load_guardant.py            # Guardant360 Excel loader
-├── panel_search.cgi            # cross-vendor search
-├── case_detail.cgi             # per-case drill-down
-├── panel_stats.cgi             # registry-level statistics
-├── suggest.cgi                 # autocomplete endpoint
-├── logout.cgi                  # Basic-auth sign-out helper
-├── search.html                 # static search form
-├── docs/
-│   ├── INSTALL.md              # deployment guide
-│   ├── LOADER_DEV.md           # how to add a new loader
-│   └── SCHEMA.md               # canonical schema reference
-└── tests/
-    └── data/                   # synthetic vendor sample reports
+├── schema.sql              canonical schema (version 2)
+├── oncounify_core.py       shared normalization library used by every loader
+├── load_foundation.py      FoundationOne CDx / FoundationOne Liquid CDx XML
+├── load_genminetop.py      GenMineTOP XML
+├── load_guardant.py        Guardant360 CDx XLSX
+├── load_panel_genes.py     assay gene lists (denominators)
+├── migrate_db.py           schema v1 -> v2 upgrade
+├── panel_search.cgi        reference web interface: cross-vendor search, TSV export
+├── case_detail.cgi         per-report drill-down
+├── panel_stats.cgi         registry overview with panel-aware frequencies
+├── suggest.cgi             autocomplete endpoint (JSON)
+├── search.html             search form
+├── panels/                 assay gene lists (see panels/README.md)
+├── docs/                   INSTALL, SCHEMA, LOADER_DEV, CURATION, field_mapping.tsv, WORKED_EXAMPLE
+├── docker/, Dockerfile, docker-compose.yml
+└── tests/                  synthetic fixtures, fixture generator, unit and end-to-end tests
 ```
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The fixtures under `tests/data/` are fully synthetic (invented identifiers,
+public hotspot variants).  **Never place real vendor reports inside this
+repository.**
 
 ## Extending OncoUnify
 
-Adding support for a new panel vendor is intentionally local: implement a
-new `load_<vendor>.py` script that parses the vendor's native deliverable
-and inserts rows into `cases`, `variants`, and (optionally)
-`non_human_contents`. No CGI or schema change is required as long as the
-vendor's fields can be mapped onto the canonical columns documented in
-[docs/SCHEMA.md](docs/SCHEMA.md). See [docs/LOADER_DEV.md](docs/LOADER_DEV.md)
-for a step-by-step recipe.
+A new assay needs one `load_<vendor>.py` that parses the vendor file into the
+canonical dictionaries and hands them to `oncounify_core`; the schema, the
+normalization rules and the web layer are shared.  See
+[docs/LOADER_DEV.md](docs/LOADER_DEV.md).
 
-## License
+## License and citation
 
-OncoUnify is released under the MIT License.
-
-## Citation
-
-If you use OncoUnify in your research, please cite the accompanying paper:
-
-> OncoUnify: a deployable, vendor-agnostic database and web interface for
-> the integrated re-use of multi-vendor cancer genomic panel reports.
-> *Database (Oxford)*, submitted.
+MIT License (see [LICENSE](LICENSE)).  If you use OncoUnify, please cite:
+Mizoue H, Higasa K. OncoUnify: an open-source ingestion and normalization
+layer for multi-vendor cancer genomic panel reports (manuscript in
+preparation).

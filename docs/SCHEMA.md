@@ -1,143 +1,209 @@
-# OncoUnify — Canonical schema reference
+# OncoUnify — schema reference and data dictionary (schema version 2)
 
-OncoUnify stores all ingested data in three relational tables backed by a
-single SQLite file (`panels.db`). The schema is intentionally narrow: no
-vendor-specific table exists, and every loader maps its native fields onto
-the same set of canonical columns.
+The authoritative definition is [`schema.sql`](../schema.sql)
+(`PRAGMA user_version = 2`).  This document explains every column.  The
+vendor-by-vendor origin of each column is tabulated in
+[`field_mapping.tsv`](field_mapping.tsv).
 
-The authoritative definition is [`schema.sql`](../schema.sql); this document
-is its annotated companion.
+## Conventions
 
----
+* **One row in `cases` per vendor report.** `(panel_name, report_id)` is
+  unique; loaders replace an existing report and all its child rows in one
+  transaction.
+* **Coordinates** (`chrom`, `pos`, `pos2`, `chrom2`) are 1-based and
+  vendor-native on the assembly in `cases.genome_build`.  Chromosomes are
+  UCSC-style (`chr1` … `chrX`, `chrY`, `chrM`).  Indels are **not**
+  re-normalized (left/right justification and HGVS 3′ shifting are left as
+  reported); compare indels across vendors by protein key or after
+  normalizing with an external tool.
+* **Verbatim and canonical side by side.** `protein_effect` and `cds_effect`
+  hold exactly what the vendor wrote; `hgvs_p` and `hgvs_c` hold the
+  canonical keys derived from them.  Nothing the vendor emits is dropped:
+  fields without a canonical column go to the JSON objects `cases.other_info`
+  and `variants.extra`.
+* **Controlled vocabularies** are enforced with `CHECK` constraints or
+  lookup tables, as noted below.  `NULL` means "not reported / not
+  assessed", never zero.
 
-## 1. `cases` — one row per genomic report
+## `so_terms` — consequence vocabulary
 
-Each case represents a single completed panel test. The `(panel_name,
-report_id)` pair is unique.
+Sequence Ontology term names (as used by Ensembl VEP) allowed in
+`variants.functional_effect`, with accession and the display group used for
+colouring and filtering.
 
-| Column | Type | Notes |
+| term | accession | group |
 |---|---|---|
-| `case_id` | INTEGER PK | autoincrement |
-| `panel_name` | TEXT NOT NULL | stable vendor + assay identifier, e.g. `FoundationOne`, `FoundationOneLiquid`, `GenMineTOP`, `Guardant360` |
-| `panel_type` | TEXT | raw `test-type` attribute as recorded by the vendor |
-| `vendor` | TEXT | manufacturer name |
-| `report_id` | TEXT | unique within `panel_name` |
-| `patient_id` | TEXT | institutional MRN or pseudonym |
-| `sex` | TEXT | as reported by the vendor |
-| `age` | INTEGER | at the time of testing |
-| `disease` | TEXT | free-text disease label from the vendor report |
-| `disease_ontology` | TEXT | ontology identifier (e.g., NCIt term) when supplied |
-| `tissue_of_origin` | TEXT | as reported by the vendor |
-| `pathology_diagnosis` | TEXT | as reported by the vendor |
-| `specimen_id` | TEXT | vendor-side specimen identifier |
-| `test_type` | TEXT | duplicates `panel_type`; preserved for backwards compatibility |
-| `percent_tumor_nuclei` | REAL | per-specimen QC |
-| `purity` | REAL | tumour purity (0–1 or %, vendor-dependent) |
-| `msi_status` | TEXT | microsatellite-instability status |
-| `tmb_score` | REAL | tumour mutational burden score |
-| `tmb_status` | TEXT | TMB call (low / intermediate / high / ...) |
-| `tmb_unit` | TEXT | unit of `tmb_score` (e.g., mutations/Mb) |
-| `date` | TEXT | report date in `YYYY-MM-DD` |
-| `ccat_date` | TEXT | C-CAT specimen collection date |
-| `ccat_cancer` | TEXT | C-CAT cancer-type label |
-| `non_human_content` | REAL | case-level scalar from FoundationOne(Liquid) |
-| `other_info` | TEXT | free-form `key=value;...` for vendor fields without a canonical home |
+| missense_variant | SO:0001583 | missense |
+| stop_gained | SO:0001587 | nonsense |
+| frameshift_variant | SO:0001589 | frameshift |
+| splice_donor_variant | SO:0001575 | splice |
+| splice_acceptor_variant | SO:0001574 | splice |
+| splice_region_variant | SO:0001630 | splice |
+| exon_loss_variant | SO:0001572 | splice |
+| inframe_deletion | SO:0001822 | inframe |
+| inframe_insertion | SO:0001821 | inframe |
+| inframe_indel | SO:0001820 | inframe |
+| start_lost | SO:0002012 | other |
+| stop_lost | SO:0001578 | other |
+| protein_altering_variant | SO:0001818 | other |
+| coding_sequence_variant | SO:0001580 | other |
+| upstream_gene_variant | SO:0001631 | other |
+| sequence_variant | SO:0001060 | other |
+| synonymous_variant | SO:0001819 | silent |
+| stop_retained_variant | SO:0001567 | silent |
+| 5_prime_UTR_variant | SO:0001623 | noncoding |
+| 3_prime_UTR_variant | SO:0001624 | noncoding |
+| UTR_variant | SO:0001622 | noncoding |
+| intron_variant | SO:0001627 | noncoding |
+| non_coding_transcript_variant | SO:0001619 | noncoding |
 
-`UNIQUE(panel_name, report_id)` enforces loader idempotency.
+### How a term is assigned (`oncounify_core.classify_consequence`)
 
----
+The same function is used by every loader:
 
-## 2. `variants` — one row per reported molecular finding
+1. **Vendor category**, when the vendor supplies one (Foundation Medicine
+   `functional-effect`): `missense` → missense_variant, `nonsense` →
+   stop_gained, `frameshift` → frameshift_variant, `nonframeshift` →
+   inframe_deletion / inframe_insertion from the protein change, `splice` →
+   splice_donor / splice_acceptor / splice_region / exon_loss from the
+   intronic offsets in the coding change, `promoter` → upstream_gene_variant.
+   `functional_effect_source = 'vendor'`.
+2. **Protein change** (`hgvs_p`): `fs` → frameshift; `ext` or `*n<aa>` →
+   stop_lost; `M1…` → start_lost; `<aa>n*` → stop_gained; `<aa>n=` →
+   synonymous; `<aa>n<aa>` → missense; `del`/`ins`/`dup`/`delins` → in-frame
+   deletion/insertion (by net length).
+3. **Coding change** (`hgvs_c`): offsets ±1–2 → donor/acceptor (also for
+   ranges that cross the exon boundary, e.g. `c.905-9_905del`), ±3–8 →
+   splice_region, larger → intron; a range from one intron across whole exons
+   to another → exon_loss; `c.-n` → 5′UTR; `c.*n` → 3′UTR; exonic indels →
+   frameshift or in-frame from their length; an exonic substitution with no
+   protein change → coding_sequence_variant.
+4. **Vendor hint** (Guardant `reporting_category`, GenMineTOP `type`):
+   `promoter` → upstream_gene_variant, `utr` → UTR_variant, `non_coding` →
+   non_coding_transcript_variant, RNA exon skipping → exon_loss_variant.
+5. VCF-style ref/alt length of a coding variant → frameshift / in-frame.
+6. Otherwise `sequence_variant` with `functional_effect_source =
+   'unclassified'` — never `NULL` for a short variant.
 
-A variant is anything the vendor reports as a finding: a short variant
-(SNV/indel), a copy-number alteration, a rearrangement/fusion, an
-expression call, or a biomarker. The `variant_type` column distinguishes
-them.
+Steps 2–5 give `functional_effect_source = 'inferred'`.  The rules operate on
+notation only (no transcript model); see Limitations in the manuscript.
 
-| Column | Type | Notes |
+## `cases` — one row per report
+
+| column | type | meaning |
 |---|---|---|
-| `variant_id` | INTEGER PK | autoincrement |
-| `case_id` | INTEGER NOT NULL | FK → `cases(case_id)` |
-| `gene` | TEXT | HGNC symbol when possible |
-| `variant_type` | TEXT | `short_variant` / `cnv` / `rearrangement` / `expression` / `biomarker` |
-| `variant_subtype` | TEXT | finer label (e.g., `amplification`, `deletion`, `fusion`) |
-| `chrom` | TEXT | UCSC-style (`chr1`...) |
-| `pos` | INTEGER | 1-based; first breakpoint for `rearrangement` |
-| `pos2` | INTEGER | second breakpoint for `rearrangement` |
-| `ref` / `alt` | TEXT | reference / alternate alleles |
-| `cds_effect` | TEXT | HGVS coding-level expression (`c.35G>A`) |
-| `protein_effect` | TEXT | HGVS protein-level expression with leading `p.` stripped (`G12D`) |
-| `strand` | TEXT | `+` or `-` |
-| `transcript` | TEXT | NM_ / ENST / RefSeq accession |
-| `functional_effect` | TEXT | one of `missense` / `nonsense` / `frameshift` / `splice` / `synonymous` (loader-inferred when not vendor-supplied) |
-| `effect` | TEXT | vendor-supplied effect description (free text) |
-| `status` | TEXT | vendor call (known / likely / unknown) |
-| `origin` | TEXT | germline / somatic when reported |
-| `classification` | TEXT | vendor / curator interpretation |
-| `allele_fraction` | REAL | 0–1 |
-| `depth` | INTEGER | read depth |
-| `copy_number` | REAL | for `cnv` |
-| `cnv_ratio` | REAL | log2 or linear ratio (vendor-dependent) |
-| `cnv_type` | TEXT | `amplification` / `loss` / ... |
-| `other_gene` | TEXT | partner gene for `rearrangement` |
-| `in_frame` | TEXT | `yes` / `no` for fusions |
-| `supporting_read_pairs` | INTEGER | fusion evidence |
-| `tpm` | REAL | for `expression` |
-| `read_count` | INTEGER | for `expression` |
-| `sample_name` | TEXT | vendor sample identifier when needed |
-| `raw_panel_type` | TEXT | the vendor element name from which this row originated (audit trail) |
-| `extra` | TEXT | free-form `key=value;...` overflow for vendor fields |
-| `clinvar_id` | TEXT | GenMineTOP-only |
-| `clinvar_url` | TEXT | GenMineTOP-only |
-| `clinvar_sig` | TEXT | clinical significance |
-| `clinvar_match` | TEXT | match level |
-| `clinvar_benign` | INTEGER | count of benign assertions |
-| `clinvar_likely_benign` | INTEGER | count |
-| `clinvar_uncertain` | INTEGER | count |
-| `maf_1kg` | REAL | 1000 Genomes minor allele frequency |
-| `maf_hgvd` | REAL | HGVD MAF (Japanese population) |
-| `maf_tommo` | REAL | ToMMo 8.3KJPN MAF |
-| `tpm_normal_n` | INTEGER | reference normal-tissue cohort size |
-| `tpm_normal_mean` | REAL | normal-tissue TPM mean |
-| `tpm_normal_sd` | REAL | normal-tissue TPM standard deviation |
+| case_id | INTEGER PK | surrogate key |
+| panel_name | TEXT NOT NULL | assay family used throughout the interface: `FoundationOne`, `FoundationOneLiquid`, `GenMineTOP`, `Guardant` |
+| panel_version | TEXT | assay/gene-list version; with panel_name, joins `panel_versions` (e.g. `FoundationOneDx`, `TDv6+TRv6`, `Guardant360 CDx`) |
+| panel_type | TEXT | vendor's own test-type label, verbatim |
+| vendor | TEXT NOT NULL | `Foundation Medicine`, `GenMine Labs`, `Guardant Health` |
+| report_id | TEXT NOT NULL | vendor report identifier (Guardant: from the file name) |
+| patient_id | TEXT | institutional patient identifier or pseudonym; may be supplied by the sidecar |
+| sex, age | TEXT, INTEGER | as reported |
+| date | TEXT | report date `YYYY-MM-DD` (GenMineTOP `<accepted>`; others via sidecar) |
+| genome_build | TEXT NOT NULL | `GRCh37` \| `GRCh38` \| `unknown` (the last only for migrated legacy rows) |
+| genome_build_source | TEXT | `vendor-file` (read from the report), `loader-default` (vendor's documented assembly), `cli` (`--genome-build`), `migration` |
+| disease | TEXT | vendor free-text disease label, or curated via sidecar |
+| disease_ontology | TEXT | the vendor's own disease classification label (Foundation Medicine `disease-ontology`); not an ontology identifier |
+| oncotree_code | TEXT | OncoTree code supplied by a curator through the sidecar |
+| tissue_of_origin | TEXT | as reported, or curated |
+| pathology_diagnosis | TEXT | as reported (GenMineTOP `specimen/pathology`; Foundation Medicine `pathology-diagnosis`) |
+| specimen_id, test_type | TEXT | vendor specimen identifier; `test_type` duplicates `panel_type` for compatibility |
+| percent_tumor_nuclei, purity | REAL | percent (0–100) |
+| non_human_content | REAL | Foundation Medicine `variant-report/@non-human-content` (case-level scalar); per-organism detail is in `non_human_contents` |
+| other_info | TEXT (JSON) | vendor case-level fields without a canonical column |
+| curated_fields | TEXT | comma-separated names of fields supplied or overridden by the sidecar |
+| source_file, source_sha256 | TEXT | provenance of the input file |
+| format_version | TEXT | detected vendor format / schema / pipeline version |
+| loader, loaded_at | TEXT | loader name and version; UTC timestamp of the last (re)load |
 
----
+## `variants` — one row per reported finding
 
-## 3. `non_human_contents` — one row per detected organism
-
-Populated by `load_foundation.py` when the FoundationOne(Liquid) XML
-contains a `<non-human-content>` element with per-organism children.
-
-| Column | Type | Notes |
+| column | type | meaning |
 |---|---|---|
-| `id` | INTEGER PK | |
-| `case_id` | INTEGER NOT NULL | FK → `cases(case_id)` |
-| `organism` | TEXT | e.g., HHV-4, HHV-8, HPV-16 |
-| `reads_per_million` | REAL | |
-| `status` | TEXT | `present` / `unknown` / ... |
-| `sample` | TEXT | sample identifier from `<dna-evidence>` |
+| variant_id | INTEGER PK | |
+| case_id | INTEGER NOT NULL | FK → cases (ON DELETE CASCADE) |
+| gene | TEXT | HGNC symbol as reported (5′ partner for fusions) |
+| variant_type | TEXT NOT NULL | `short_variant` \| `cnv` \| `rearrangement` (fusions, rearrangements, RNA exon skipping) \| `expression` |
+| variant_subtype | TEXT | vendor-native class label, verbatim (e.g. `amplification`, `fusion`, `splicing-variant`, `SNV`, `Deletion`) |
+| chrom, pos | TEXT, INTEGER | position; start of a CNV segment; first breakpoint |
+| pos2, chrom2 | INTEGER, TEXT | end of a CNV segment; second breakpoint |
+| ref, alt | TEXT | alleles as reported (VCF-style with anchor base for GenMineTOP and Guardant) |
+| transcript, strand | TEXT | as reported |
+| cds_effect, protein_effect | TEXT | vendor strings, verbatim |
+| hgvs_c | TEXT | `c.`-prefixed coding change (not validated against a transcript) |
+| hgvs_p | TEXT | canonical protein key: `p.` + one-letter HGVS body (`p.G12D`, `p.T887Rfs*19`, `p.A999=`); NULL when no protein change is reported |
+| functional_effect | TEXT | Sequence Ontology term (FK → so_terms); set for short variants and exon skipping |
+| functional_effect_so | TEXT | SO accession |
+| functional_effect_raw | TEXT | vendor category or hint the term was derived from |
+| functional_effect_source | TEXT | `vendor` \| `inferred` \| `unclassified` |
+| status | TEXT | vendor call status: Foundation Medicine `known`/`likely`/`unknown`; GenMineTOP `finding`/`notice`; Guardant `called` (or `not_called` with `--include-uncalled`) |
+| origin | TEXT | `somatic` \| `germline`; NULL = not assessed (tumor-only assays) |
+| classification | TEXT | vendor interpretation class (GenMineTOP `ag-class`) |
+| allele_fraction | REAL | 0–1 (Guardant `percentage`/100; GenMineTOP alt/depth) |
+| depth | INTEGER | read depth at the locus |
+| copy_number, cnv_ratio | REAL | vendor-native values; **not harmonized** across vendors |
+| cnv_type | TEXT | `amplification` \| `deletion` \| `other` |
+| other_gene | TEXT | fusion / rearrangement partner (3′ partner) |
+| in_frame | TEXT | `yes` \| `no` \| `unknown` |
+| supporting_read_pairs | INTEGER | DNA evidence for rearrangements (Foundation Medicine) |
+| read_count | INTEGER | RNA reads supporting a fusion/exon skipping event, or expression read count |
+| tpm | REAL | expression, transcripts per million (tumor) |
+| sample_name | TEXT | vendor sample identifier for the evidence |
+| effect | TEXT | vendor free-text description (Foundation Medicine rearrangement `description`; GenMineTOP exon-skipping junction) |
+| raw_panel_type | TEXT | vendor element or sheet the row came from (audit trail) |
+| extra | TEXT (JSON) | vendor variant fields without a canonical column (e.g. equivocal, subclonal, exon, reporting_category, cytoband, breakpoints) |
+| clinvar_* | | GenMineTOP ClinVar annotation (id, URL, significance, match level, assertion counts) |
+| maf_1kg, maf_hgvd, maf_tommo | REAL | GenMineTOP population allele frequencies |
+| tpm_normal_n/mean/sd | | GenMineTOP normal-tissue expression reference |
 
----
+## `biomarkers` — TMB and MSI
 
-## 4. Indexes
+| column | meaning |
+|---|---|
+| name | `TMB` \| `MSI` |
+| value | numeric score if reported (Foundation Medicine TMB; GenMineTOP exonic non-synonymous alteration frequency; Guardant MSI score) |
+| unit | e.g. `mutations/Mb`, `Guardant MSI score` |
+| call | TMB: `high` / `intermediate` / `low` / `indeterminate`; MSI: `MSI-H` / `MSS` (MSS and MSI-L) / `indeterminate` |
+| call_raw | vendor verbatim call |
+| assay | method identifier; values are comparable only within one assay (e.g. `FoundationOne CDx tissue TMB`, `FoundationOne Liquid CDx blood TMB (bTMB)`, `GenMineTOP exonic non-synonymous alteration frequency (tumor-normal paired)`, `Guardant360 CDx MSI (plasma cfDNA)`) |
+| source_field | vendor field the value came from |
 
-The schema declares secondary indexes on the columns most often queried by
-the CGIs:
+## `non_human_contents`
 
-- `variants(gene)`, `variants(variant_type)`, `variants(protein_effect)`
-- `cases(panel_name)`, `cases(report_id)`, `cases(patient_id)`,
-  `cases(date)`, `cases(ccat_date)`, `cases(ccat_cancer)`,
-  `cases(disease)`, `cases(tissue_of_origin)`, `cases(pathology_diagnosis)`
-- `non_human_contents(case_id)`
+Per-organism rows from Foundation Medicine `non-human-content/non-human`
+(organism, reads per million, status, sample).
 
-No full-text-search index is created by default; SQLite `LIKE` is fast
-enough at the registry sizes (≤10⁵ cases) for which OncoUnify is intended.
+## `panel_versions`, `panel_genes` — assay content
 
----
+One `panel_versions` row per `(panel_name, panel_version)`; `panel_genes`
+lists the genes it interrogates, with flags for short variants, copy number
+and rearrangements.  Loaded from `panels/*.tsv` by `load_panel_genes.py`.
+These are the denominators of the frequencies in `panel_stats.cgi`.
 
-## 5. Migration
+## Views
 
-`CREATE TABLE IF NOT EXISTS` does **not** add columns to an existing table.
-When the canonical schema grows, ship an incremental migration as a separate
-`migrations/YYYY-MM-DD-<description>.sql` file containing only
-`ALTER TABLE` statements, and document it in [INSTALL.md §6](INSTALL.md).
+| view | content |
+|---|---|
+| v_short_variants | short variants joined to report identifiers and genome build |
+| v_copy_number | CNV rows |
+| v_rearrangements | fusions, rearrangements, exon skipping |
+| v_expression | expression rows |
+| v_case_genes_tested | one row per (case, gene) interrogated by the case's assay |
+
+## Indexes
+
+`variants(case_id)`, `variants(gene)`, `variants(other_gene)`,
+`variants(hgvs_p)`, `variants(variant_type)`, `variants(functional_effect)`,
+`cases(panel_name, panel_version)`, `cases(report_id)`, `cases(patient_id)`,
+`cases(date)`, `cases(disease)`, `cases(oncotree_code)`,
+`cases(tissue_of_origin)`, `cases(pathology_diagnosis)`,
+`biomarkers(case_id)`, `non_human_contents(case_id)`, `panel_genes(gene)`.
+Gene and protein filters are exact-match and use these indexes; free-text
+disease filters are substring matches and scan `cases`.
+
+## Upgrading
+
+A version-1 database is refused by version-2 loaders.  Rebuild it from the
+source reports (preferred), or upgrade it in place with
+`python3 migrate_db.py panels.db` (a backup is kept).
