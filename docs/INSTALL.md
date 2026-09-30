@@ -153,6 +153,15 @@ curl -u alice "https://oncounify.example.org/cgi-bin/panel_search.cgi?gene=TP53&
 * Encrypt the volume holding `panels.db` at rest with operating-system
   facilities if required by local policy.
 
+## Known limitations of the reference interface
+
+* Autocompletion suggests values for the last comma-separated term of a
+  field only.
+* Gene search resolves previous HGNC symbols (`gene_symbol_map`) but not
+  aliases.
+* The disease filter is a substring match across the disease fields and
+  cannot use an index; gene and protein filters are exact and indexed.
+
 ## Upgrading from OncoUnify 1.x
 
 Version-2 loaders refuse a version-1 database.  Either rebuild the database

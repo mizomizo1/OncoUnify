@@ -31,5 +31,5 @@ python3 load_panel_genes.py /tmp/test.db tests/data/panels --allow-synthetic
 sqlite3 /tmp/test.db "SELECT panel_name, report_id, gene, hgvs_p FROM v_short_variants WHERE hgvs_p = 'p.G12D';"
 ```
 
-Expected: 7 reports, 39 variant rows, 3 KRAS p.G12D rows (one per vendor).
+Expected: 7 reports, 40 variant rows, 3 KRAS p.G12D rows (one per vendor).
 The full expectations are in `tests/test_pipeline.py`.
