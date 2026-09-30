@@ -1,4 +1,14 @@
 #!/usr/bin/perl
+# panel_search.cgi — cross-vendor search over an OncoUnify database.
+#
+# Reference implementation of a read-only query interface.  Every query is a
+# parameterized SELECT over the canonical schema; see docs/SCHEMA.md.
+#
+# Configuration (environment, e.g. Apache SetEnv):
+#   ONCOUNIFY_DB        path to panels.db             (default /var/www/data/panels.db)
+#   ONCOUNIFY_CGI_URL   URL prefix of the CGI scripts (default /cgi-bin)
+#   ONCOUNIFY_HTML_URL  URL prefix of search.html     (default /panel)
+#   ONCOUNIFY_MAX_ROWS  hard cap on returned rows      (default 100000)
 use strict;
 use warnings;
 use utf8;
@@ -8,917 +18,506 @@ use DBD::SQLite ();
 
 binmode(STDOUT, ':encoding(UTF-8)');
 
-my $DB_FILE = '/var/www/data/panels.db';
+my $DB_FILE  = $ENV{ONCOUNIFY_DB}       || '/var/www/data/panels.db';
+my $CGI_URL  = $ENV{ONCOUNIFY_CGI_URL}  || '/cgi-bin';
+my $HTML_URL = $ENV{ONCOUNIFY_HTML_URL} || '/panel';
+my $MAX_ROWS = ($ENV{ONCOUNIFY_MAX_ROWS} // '') =~ /^\d+$/ ? $ENV{ONCOUNIFY_MAX_ROWS} : 100000;
 
 my $q = CGI->new;
 
-my $gene           = $q->param('gene')           // '';
-my $protein_effect = $q->param('protein_effect') // '';
-my $patient_id     = $q->param('patient_id')     // '';
-my $variant_type   = $q->param('variant_type')   // '';
-my $disease        = $q->param('disease')        // '';
-my $panel_name     = $q->param('panel_name')     // '';
-my $view_mode      = lc($q->param('view_mode')   // 'variant');
-my $limit          = $q->param('limit')          // 100000;
-my $download       = $q->param('download')       // '';
-my $want_tsv       = (defined $download && lc($download) eq 'tsv');
+sub _p { my $v = $q->param($_[0]); $v = '' unless defined $v; $v =~ s/^\s+|\s+$//g; return $v; }
 
-for ($gene, $protein_effect, $patient_id, $variant_type, $disease, $panel_name, $view_mode) {
-    $_ //= '';
-    s/^\s+|\s+$//g;
-}
+my $gene             = _p('gene');
+my $gene_match       = lc(_p('gene_match')) eq 'substring' ? 'substring' : 'exact';
+my $protein_effect   = _p('protein_effect');
+my $patient_id       = _p('patient_id');
+my $variant_type     = _p('variant_type');
+my $consequence      = lc(_p('consequence'));
+my $disease          = _p('disease');
+my $panel_name       = _p('panel_name');
+my $include_uncalled = _p('include_uncalled') eq '1' ? 1 : 0;
+my $view_mode        = lc(_p('view_mode')) || 'variant';
+my $limit            = _p('limit');
+my $want_tsv         = lc(_p('download')) eq 'tsv';
 
 $view_mode = 'variant' unless $view_mode =~ /^(variant|case|patient)$/;
-$limit = 200 if !$limit || $limit !~ /^\d+$/;
-$limit = 100000 if $limit > 100000;
+$variant_type = '' unless $variant_type =~ /^(short_variant|cnv|rearrangement|expression)$/;
+$consequence = '' unless $consequence =~ /^(protein_altering|missense|nonsense|frameshift|splice|inframe|other|silent|noncoding)$/;
+$limit = 500 if $limit !~ /^\d+$/ || $limit < 1;
+$limit = $MAX_ROWS if $limit > $MAX_ROWS;
 
-my $dbh = DBI->connect(
-    "dbi:SQLite:dbname=$DB_FILE",
-    "",
-    "",
-    {
-        RaiseError        => 1,
-        sqlite_unicode    => 1,
-        AutoCommit        => 1,
-        ReadOnly          => 1,
-        sqlite_open_flags => DBD::SQLite::OPEN_READONLY(),
-    }
-) or die $DBI::errstr;
-
-sub _safe {
-    my ($v) = @_;
-    return defined $v ? $v : '';
-}
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+sub _safe { defined $_[0] ? $_[0] : '' }
 
 sub _h {
     my ($s) = @_;
     $s = '' unless defined $s;
-    $s =~ s/&/&amp;/g;
-    $s =~ s/</&lt;/g;
-    $s =~ s/>/&gt;/g;
-    $s =~ s/"/&quot;/g;
-    $s =~ s/'/&#39;/g;
+    $s =~ s/&/&amp;/g; $s =~ s/</&lt;/g; $s =~ s/>/&gt;/g; $s =~ s/"/&quot;/g; $s =~ s/'/&#39;/g;
     return $s;
 }
 
-sub _view_label {
-    my ($v) = @_;
-    return 'per patient' if $v eq 'patient';
-    return 'per case'    if $v eq 'case';
-    return 'per variant';
+# TSV cell: tabs and line breaks inside a value would shift the columns
+sub _t { my $s = _safe($_[0]); $s =~ s/[\t\r\n]+/ /g; return $s; }
+
+# Escape LIKE metacharacters; used with "LIKE ? ESCAPE '\'"
+sub _like { my $s = shift; $s =~ s/([\\%_])/\\$1/g; return $s; }
+
+sub _fail {
+    my ($status, $msg) = @_;
+    print $q->header(-type => 'text/plain', -charset => 'utf-8', -status => $status);
+    print "$msg\n";
+    exit;
 }
+
+my %AA3 = (Ala=>'A',Arg=>'R',Asn=>'N',Asp=>'D',Cys=>'C',Gln=>'Q',Glu=>'E',Gly=>'G',His=>'H',Ile=>'I',
+           Leu=>'L',Lys=>'K',Met=>'M',Phe=>'F',Pro=>'P',Ser=>'S',Thr=>'T',Trp=>'W',Tyr=>'Y',Val=>'V',
+           Ter=>'*',Sec=>'U',Pyl=>'O',Xaa=>'X');
+my $AA3_RE = join('|', sort { length($b) <=> length($a) } keys %AA3);
+
+# Same normalization as oncounify_core.canonical_protein(): p.Gly12Asp, pG12D, G12D -> p.G12D
+sub canonical_protein {
+    my ($s) = @_;
+    $s = '' unless defined $s;
+    $s =~ s/\s+//g;
+    return '' if $s eq '';
+    $s =~ s/^\(?p\.//;
+    $s =~ s/^p(?=[A-Z*(])//;
+    $s =~ s/^\(+|\)+$//g;
+    $s =~ s/($AA3_RE)/$AA3{$1}/g;
+    $s =~ s/(?<=\d)X$/*/;
+    $s =~ s/fsX/fs*/g;
+    if ($s =~ /^([A-Z*])(\d+)([A-Z*])$/ && $1 eq $3) { $s = "$1$2=" }
+    return "p.$s";
+}
+
+sub _split_tokens { return grep { length } map { s/^\s+|\s+$//gr } split /,/, ($_[0] // '') }
+
+sub _view_label { $_[0] eq 'patient' ? 'per patient' : $_[0] eq 'case' ? 'per case' : 'per variant' }
 
 sub _type_badge {
     my ($t) = @_;
-    $t ||= '';
-    my $label = $t;
-    my $cls   = 'tag-default';
-    if ($t eq 'short_variant') {
-        $label = 'SNV/indel';
-        $cls   = 'tag-snv';
-    } elsif ($t eq 'cnv') {
-        $label = 'CNV';
-        $cls   = 'tag-cnv';
-    } elsif ($t eq 'rearrangement') {
-        $label = 'Rearrangement';
-        $cls   = 'tag-rearr';
-    } elsif ($t eq 'expression') {
-        $label = 'Expression';
-        $cls   = 'tag-exp';
-    } elsif ($t eq 'biomarker') {
-        $label = 'Biomarker';
-        $cls   = 'tag-bm';
-    }
+    my %m = (short_variant => ['SNV/indel', 'tag-snv'], cnv => ['CNV', 'tag-cnv'],
+             rearrangement => ['Rearrangement', 'tag-rearr'], expression => ['Expression', 'tag-exp']);
+    my ($label, $cls) = @{ $m{_safe($t)} || [_safe($t), 'tag-default'] };
     return qq{<span class="tag $cls">} . _h($label) . qq{</span>};
 }
 
-sub _split_csv_tokens {
-    my ($s) = @_;
-    return grep { length($_) } map { s/^\s+|\s+$//gr } split /,/, ($s // '');
+# ---------------------------------------------------------------------------
+# WHERE clause (static fragments + bound parameters only)
+# ---------------------------------------------------------------------------
+my (@where, @bind);
+
+if ($gene ne '') {
+    my @tok = _split_tokens($gene);
+    if ($gene_match eq 'exact') {
+        my %seen; my @vals = grep { !$seen{$_}++ } map { ($_, uc $_) } @tok;
+        my $ph = join(',', ('?') x @vals);
+        push @where, "(variants.gene IN ($ph) OR variants.other_gene IN ($ph))";
+        push @bind, @vals, @vals;
+    } else {
+        push @where, '(' . join(' OR ', map { "variants.gene LIKE ? ESCAPE '\\' OR variants.other_gene LIKE ? ESCAPE '\\'" } @tok) . ')';
+        push @bind, map { ('%' . _like($_) . '%') x 2 } @tok;
+    }
 }
 
-sub _build_where_and_bind {
-    my @where;
-    my @bind;
-
-    if ($gene) {
-        my @genes = _split_csv_tokens($gene);
-        if (@genes) {
-            push @where, '(' . join(' OR ', map { 'variants.gene LIKE ?' } @genes) . ')';
-            push @bind, map { '%' . $_ . '%' } @genes;
-        }
+if ($protein_effect ne '') {
+    my $cp = canonical_protein($protein_effect);
+    if ($cp =~ /^p\.([A-Z*])(\d+)$/) {                       # residue only, e.g. G12 -> any change at G12
+        push @where, "variants.hgvs_p GLOB ?";
+        push @bind, "p.$1$2\[^0-9\]*";                       # SQLite GLOB negates with '^'
+    } elsif ($cp =~ /^p\.([A-Z*])(\d+)[A-Z*]?fs/) {           # any frameshift starting at the residue
+        push @where, "(variants.hgvs_p GLOB ? OR variants.hgvs_p GLOB ?)";
+        push @bind, "p.$1$2fs*", "p.$1$2\[A-Z*\]fs*";
+    } else {
+        push @where, 'variants.hgvs_p = ?';
+        push @bind, $cp;
     }
-
-    if ($protein_effect) {
-        my $raw = $protein_effect;
-        my $norm = $raw;
-        $norm =~ s/^\s*p\.?\s*//i;
-        $norm =~ s/\s+//g;
-
-        my @patterns;
-        push @patterns, '%' . $raw  . '%';
-        push @patterns, '%' . $norm . '%';
-        push @patterns, '%p.' . $norm . '%';
-        push @patterns, '%p'  . $norm . '%';
-        my %seen;
-        @patterns = grep { !$seen{$_}++ } @patterns;
-
-        push @where, '(' . join(' OR ', map { 'variants.protein_effect LIKE ?' } @patterns) . ')';
-        push @bind, @patterns;
-    }
-
-    if ($patient_id) {
-        push @where, 'cases.patient_id LIKE ?';
-        push @bind, '%' . $patient_id . '%';
-    }
-
-    if ($variant_type) {
-        push @where, 'variants.variant_type = ?';
-        push @bind, $variant_type;
-    }
-
-    if ($disease) {
-        my $pat = '%' . $disease . '%';
-        push @where, '(cases.disease LIKE ? OR cases.tissue_of_origin LIKE ? OR cases.pathology_diagnosis LIKE ?)';
-        push @bind, ($pat, $pat, $pat);
-    }
-
-    if ($panel_name) {
-        push @where, 'cases.panel_name = ?';
-        push @bind, $panel_name;
-    }
-
-    my $where_sql = @where ? join(' AND ', @where) : '1=1';
-    return ($where_sql, @bind);
 }
 
-sub _render_case_links {
-    my ($raw) = @_;
-    return '' unless defined $raw && length $raw;
-    my @items;
-    for my $pair (split /,/, $raw) {
-        next unless length $pair;
-        my ($cid, $rid) = split /\|/, $pair, 2;
-        next unless defined $cid && $cid ne '';
-        my $label = (defined $rid && $rid ne '') ? $rid : ('case:' . $cid);
-        push @items, qq{<a href="/cgi-bin/case_detail.cgi?case_id=} . _h($cid) . qq{">} . _h($label) . qq{</a>};
-    }
-    return join('<br>', @items);
+if ($patient_id ne '') {
+    push @where, "cases.patient_id LIKE ? ESCAPE '\\'";
+    push @bind, '%' . _like($patient_id) . '%';
 }
 
-my ($where_sql, @bind) = _build_where_and_bind();
+if ($variant_type ne '') {
+    push @where, 'variants.variant_type = ?';
+    push @bind, $variant_type;
+}
 
-my ($sql, @exec_bind);
+if ($consequence ne '') {
+    if ($consequence eq 'protein_altering') {
+        push @where, "variants.functional_effect IN (SELECT term FROM so_terms WHERE display_group NOT IN ('silent','noncoding'))";
+    } else {
+        push @where, 'variants.functional_effect IN (SELECT term FROM so_terms WHERE display_group = ?)';
+        push @bind, $consequence;
+    }
+}
 
+if ($disease ne '') {
+    my $pat = '%' . _like($disease) . '%';
+    push @where, '(' . join(' OR ', map { "cases.$_ LIKE ? ESCAPE '\\'" }
+                               qw(disease disease_ontology oncotree_code tissue_of_origin pathology_diagnosis)) . ')';
+    push @bind, ($pat) x 5;
+}
+
+if ($panel_name ne '') {
+    push @where, 'cases.panel_name = ?';
+    push @bind, $panel_name;
+}
+
+push @where, "(variants.status IS NULL OR variants.status != 'not_called')" unless $include_uncalled;
+
+my $where_sql = @where ? join("\n  AND ", @where) : '1=1';
+
+# ---------------------------------------------------------------------------
+# queries
+# ---------------------------------------------------------------------------
+my $NH_SUMMARY = <<'SQL';
+(SELECT group_concat(nh.organism || '(' || printf('%.0f', COALESCE(nh.reads_per_million, 0.0)) || ')', ', ')
+   FROM non_human_contents nh WHERE nh.case_id = cases.case_id)
+SQL
+my $BM_SUMMARY = <<'SQL';
+(SELECT group_concat(b.name || COALESCE(' ' || b.call, '') ||
+                     CASE WHEN b.value IS NOT NULL THEN ' (' || b.value || COALESCE(' ' || b.unit, '') || ')' ELSE '' END, '; ')
+   FROM biomarkers b WHERE b.case_id = cases.case_id)
+SQL
+
+my $sql;
 if ($view_mode eq 'variant') {
     $sql = <<"SQL";
-SELECT
-    cases.case_id,
-    cases.panel_name,
-    cases.report_id,
-    cases.patient_id,
-    cases.disease,
-    cases.tissue_of_origin,
-    cases.pathology_diagnosis,
-    variants.gene,
-    variants.variant_type,
-    variants.variant_subtype,
-    variants.cds_effect,
-    variants.protein_effect,
-    variants.strand,
-    variants.transcript,
-    variants.functional_effect,
-    variants.status,
-    variants.origin,
-    variants.classification,
-    variants.allele_fraction,
-    variants.depth,
-    variants.copy_number,
-    variants.cnv_ratio,
-    variants.clinvar_id,
-    variants.clinvar_sig,
-    variants.clinvar_match,
-    variants.maf_1kg,
-    variants.maf_hgvd,
-    variants.maf_tommo,
-    variants.tpm,
-    variants.tpm_normal_mean,
-    variants.tpm_normal_sd,
-    (
-      SELECT group_concat(
-               nh.organism || '(' || printf('%.0f', COALESCE(nh.reads_per_million, 0.0)) || ')',
-               ', '
-             )
-      FROM non_human_contents nh
-      WHERE nh.case_id = cases.case_id
-    ) AS non_human_summary
+SELECT cases.case_id, cases.panel_name, cases.report_id, cases.patient_id, cases.date, cases.genome_build,
+       cases.disease, cases.oncotree_code, cases.tissue_of_origin, cases.pathology_diagnosis,
+       variants.gene, variants.other_gene, variants.variant_type, variants.variant_subtype,
+       variants.chrom, variants.pos, variants.chrom2, variants.pos2, variants.ref, variants.alt,
+       variants.transcript, variants.hgvs_c, variants.hgvs_p, variants.protein_effect,
+       variants.functional_effect, variants.functional_effect_so, variants.functional_effect_source,
+       so_terms.display_group,
+       variants.status, variants.origin, variants.classification,
+       variants.allele_fraction, variants.depth, variants.copy_number, variants.cnv_type, variants.cnv_ratio,
+       variants.in_frame, variants.clinvar_id, variants.clinvar_sig, variants.clinvar_match,
+       variants.maf_1kg, variants.maf_hgvd, variants.maf_tommo,
+       variants.tpm, variants.tpm_normal_mean, variants.tpm_normal_sd,
+       $NH_SUMMARY AS non_human_summary
+FROM variants
+JOIN cases ON variants.case_id = cases.case_id
+LEFT JOIN so_terms ON so_terms.term = variants.functional_effect
+WHERE $where_sql
+ORDER BY cases.case_id, variants.gene, variants.pos
+LIMIT ?
+SQL
+} elsif ($view_mode eq 'case') {
+    $sql = <<"SQL";
+SELECT cases.case_id, cases.panel_name, cases.report_id, cases.patient_id, cases.date, cases.genome_build,
+       cases.disease, cases.oncotree_code, cases.tissue_of_origin, cases.pathology_diagnosis,
+       COUNT(*) AS matched_variant_count,
+       COUNT(DISTINCT variants.gene) AS matched_gene_count,
+       group_concat(DISTINCT variants.gene) AS matched_genes,
+       group_concat(DISTINCT variants.variant_type) AS matched_variant_types,
+       $BM_SUMMARY AS biomarker_summary,
+       $NH_SUMMARY AS non_human_summary
 FROM variants
 JOIN cases ON variants.case_id = cases.case_id
 WHERE $where_sql
-ORDER BY cases.case_id, variants.gene
+GROUP BY cases.case_id
+ORDER BY COALESCE(cases.date, '') DESC, cases.case_id DESC
 LIMIT ?
 SQL
-    @exec_bind = (@bind, $limit);
-}
-elsif ($view_mode eq 'case') {
+} else {
     $sql = <<"SQL";
-WITH filtered AS (
-    SELECT
-        cases.case_id,
-        cases.panel_name,
-        cases.report_id,
-        cases.patient_id,
-        cases.date,
-        cases.disease,
-        cases.tissue_of_origin,
-        cases.pathology_diagnosis,
-        variants.gene,
-        variants.variant_type,
-        variants.variant_subtype,
-        variants.protein_effect,
-        variants.functional_effect,
-        variants.status
+WITH f AS (
+    SELECT cases.case_id, cases.panel_name, cases.report_id, cases.patient_id, cases.date,
+           cases.disease, cases.oncotree_code, cases.tissue_of_origin, cases.pathology_diagnosis,
+           variants.gene
     FROM variants
     JOIN cases ON variants.case_id = cases.case_id
     WHERE $where_sql
 )
-SELECT
-    f.case_id,
-    f.panel_name,
-    f.report_id,
-    f.patient_id,
-    f.date,
-    f.disease,
-    f.tissue_of_origin,
-    f.pathology_diagnosis,
-    COUNT(*) AS matched_variant_count,
-    COUNT(DISTINCT f.gene) AS matched_gene_count,
-    group_concat(DISTINCT f.gene) AS matched_genes,
-    group_concat(DISTINCT f.variant_type) AS matched_variant_types,
-    (
-      SELECT group_concat(
-               nh.organism || '(' || printf('%.0f', COALESCE(nh.reads_per_million, 0.0)) || ')',
-               ', '
-             )
-      FROM non_human_contents nh
-      WHERE nh.case_id = f.case_id
-    ) AS non_human_summary
-FROM filtered f
-GROUP BY
-    f.case_id, f.panel_name, f.report_id, f.patient_id, f.date,
-    f.disease, f.tissue_of_origin, f.pathology_diagnosis
-ORDER BY COALESCE(f.date, '') DESC, f.case_id DESC
-LIMIT ?
-SQL
-    @exec_bind = (@bind, $limit);
-}
-else {
-    $sql = <<"SQL";
-WITH filtered AS (
-    SELECT
-        cases.case_id,
-        cases.panel_name,
-        cases.report_id,
-        cases.patient_id,
-        cases.date,
-        cases.disease,
-        cases.tissue_of_origin,
-        cases.pathology_diagnosis,
-        variants.gene,
-        variants.variant_type,
-        variants.variant_subtype,
-        variants.protein_effect,
-        variants.functional_effect,
-        variants.status
-    FROM variants
-    JOIN cases ON variants.case_id = cases.case_id
-    WHERE $where_sql
-)
-SELECT
-    CASE
-      WHEN f.patient_id IS NOT NULL AND TRIM(f.patient_id) != '' THEN f.patient_id
-      ELSE '[case:' || f.case_id || ']'
-    END AS patient_group,
-    CASE
-      WHEN f.patient_id IS NOT NULL AND TRIM(f.patient_id) != '' THEN f.patient_id
-      ELSE ''
-    END AS patient_id_display,
-    COUNT(DISTINCT f.case_id) AS case_count,
-    MAX(COALESCE(f.date, '')) AS latest_date,
-    group_concat(DISTINCT f.report_id) AS report_ids,
-    group_concat(DISTINCT f.panel_name) AS panel_names,
-    group_concat(DISTINCT f.disease) AS diseases,
-    group_concat(DISTINCT f.tissue_of_origin) AS tissues,
-    group_concat(DISTINCT f.pathology_diagnosis) AS pathologies,
-    COUNT(*) AS matched_variant_count,
-    COUNT(DISTINCT f.gene) AS matched_gene_count,
-    group_concat(DISTINCT f.gene) AS matched_genes,
-    group_concat(DISTINCT f.case_id || '|' || COALESCE(f.report_id, '')) AS case_links
-FROM filtered f
+SELECT CASE WHEN f.patient_id IS NOT NULL AND TRIM(f.patient_id) != '' THEN f.patient_id
+            ELSE '[case:' || f.case_id || ']' END AS patient_group,
+       COUNT(DISTINCT f.case_id) AS case_count,
+       MAX(COALESCE(f.date, '')) AS latest_date,
+       group_concat(DISTINCT f.panel_name) AS panel_names,
+       group_concat(DISTINCT f.disease) AS diseases,
+       group_concat(DISTINCT f.oncotree_code) AS oncotree_codes,
+       group_concat(DISTINCT f.tissue_of_origin) AS tissues,
+       group_concat(DISTINCT f.pathology_diagnosis) AS pathologies,
+       COUNT(*) AS matched_variant_count,
+       COUNT(DISTINCT f.gene) AS matched_gene_count,
+       group_concat(DISTINCT f.gene) AS matched_genes,
+       group_concat(DISTINCT f.case_id || '|' || COALESCE(f.report_id, '') || '|' || f.panel_name) AS case_links
+FROM f
 GROUP BY patient_group
 ORDER BY latest_date DESC, matched_variant_count DESC, patient_group
 LIMIT ?
 SQL
-    @exec_bind = (@bind, $limit);
 }
 
+_fail('500 Internal Server Error', "OncoUnify database not found or not readable: set ONCOUNIFY_DB") unless -r $DB_FILE;
+my $dbh = eval {
+    DBI->connect("dbi:SQLite:dbname=$DB_FILE", '', '', {
+        RaiseError => 1, PrintError => 0, sqlite_unicode => 1, AutoCommit => 1, ReadOnly => 1,
+        sqlite_open_flags => DBD::SQLite::OPEN_READONLY(),
+    });
+} or _fail('500 Internal Server Error', 'Cannot open the OncoUnify database.');
+
 my $sth = $dbh->prepare($sql);
-$sth->execute(@exec_bind);
+$sth->execute(@bind, $limit);
+my @rows;
+while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+$sth->finish;
+$dbh->disconnect;
 
+sub _loc {
+    my ($r) = @_;
+    return '' unless _safe($r->{chrom}) ne '';
+    my $s = $r->{chrom} . (defined $r->{pos} ? ':' . $r->{pos} : '');
+    if (_safe($r->{chrom2}) ne '' || defined $r->{pos2}) {
+        $s .= ' / ' . (_safe($r->{chrom2}) ne '' ? $r->{chrom2} . ':' : '') . _safe($r->{pos2});
+    }
+    return $s;
+}
+sub _num { my ($v, $f) = @_; defined $v ? sprintf($f, $v) : '' }
+
+# ---------------------------------------------------------------------------
+# TSV
+# ---------------------------------------------------------------------------
 if ($want_tsv) {
-    my $fname = "panel_search_${view_mode}.tsv";
     print "Content-Type: text/tab-separated-values; charset=utf-8\r\n";
-    print qq{Content-Disposition: attachment; filename="$fname"\r\n\r\n};
-
+    print qq{Content-Disposition: attachment; filename="oncounify_${view_mode}.tsv"\r\n\r\n};
+    my @cols;
     if ($view_mode eq 'variant') {
-        print join("\t", qw(case_id panel report_id patient_id disease tissue_of_origin pathology_diagnosis gene variant_type variant_subtype cds_effect protein_effect strand transcript functional_effect status origin classification allele_fraction depth copy_number cnv_ratio clinvar_id clinvar_sig clinvar_match maf_1kg maf_hgvd maf_tommo tpm_tumor tpm_normal_mean tpm_normal_sd non_human_summary)), "\n";
-        while (my $row = $sth->fetchrow_hashref) {
-            my @cols = (
-                _safe($row->{case_id}),
-                _safe($row->{panel_name}),
-                _safe($row->{report_id}),
-                _safe($row->{patient_id}),
-                _safe($row->{disease}),
-                _safe($row->{tissue_of_origin}),
-                _safe($row->{pathology_diagnosis}),
-                _safe($row->{gene}),
-                _safe($row->{variant_type}),
-                _safe($row->{variant_subtype}),
-                _safe($row->{cds_effect}),
-                _safe($row->{protein_effect}),
-                _safe($row->{strand}),
-                _safe($row->{transcript}),
-                _safe($row->{functional_effect}),
-                _safe($row->{status}),
-                _safe($row->{origin}),
-                _safe($row->{classification}),
-                defined $row->{allele_fraction} ? sprintf('%.4f', $row->{allele_fraction}) : '',
-                defined $row->{depth} ? $row->{depth} : '',
-                defined $row->{copy_number} ? sprintf('%.2f', $row->{copy_number}) : '',
-                defined $row->{cnv_ratio} ? sprintf('%.2f', $row->{cnv_ratio}) : '',
-                _safe($row->{clinvar_id}),
-                _safe($row->{clinvar_sig}),
-                _safe($row->{clinvar_match}),
-                defined $row->{maf_1kg} ? sprintf('%.4g', $row->{maf_1kg}) : '',
-                defined $row->{maf_hgvd} ? sprintf('%.4g', $row->{maf_hgvd}) : '',
-                defined $row->{maf_tommo} ? sprintf('%.4g', $row->{maf_tommo}) : '',
-                defined $row->{tpm} ? sprintf('%.2f', $row->{tpm}) : '',
-                defined $row->{tpm_normal_mean} ? sprintf('%.2f', $row->{tpm_normal_mean}) : '',
-                defined $row->{tpm_normal_sd} ? sprintf('%.2f', $row->{tpm_normal_sd}) : '',
-                _safe($row->{non_human_summary}),
-            );
-            print join("\t", @cols), "\n";
-        }
+        @cols = qw(case_id panel_name report_id patient_id date genome_build disease oncotree_code tissue_of_origin
+                   pathology_diagnosis gene other_gene variant_type variant_subtype chrom pos chrom2 pos2 ref alt
+                   transcript hgvs_c hgvs_p protein_effect functional_effect functional_effect_so
+                   functional_effect_source status origin classification allele_fraction depth copy_number cnv_type
+                   cnv_ratio in_frame clinvar_id clinvar_sig clinvar_match maf_1kg maf_hgvd maf_tommo tpm
+                   tpm_normal_mean tpm_normal_sd non_human_summary);
+    } elsif ($view_mode eq 'case') {
+        @cols = qw(case_id panel_name report_id patient_id date genome_build disease oncotree_code tissue_of_origin
+                   pathology_diagnosis matched_variant_count matched_gene_count matched_genes matched_variant_types
+                   biomarker_summary non_human_summary);
+    } else {
+        @cols = qw(patient_group case_count latest_date panel_names diseases oncotree_codes tissues pathologies
+                   matched_variant_count matched_gene_count matched_genes case_links);
     }
-    elsif ($view_mode eq 'case') {
-        print join("\t", qw(case_id panel report_id patient_id date disease tissue_of_origin pathology_diagnosis matched_variant_count matched_gene_count matched_genes matched_variant_types non_human_summary)), "\n";
-        while (my $row = $sth->fetchrow_hashref) {
-            my @cols = (
-                _safe($row->{case_id}), _safe($row->{panel_name}), _safe($row->{report_id}), _safe($row->{patient_id}), _safe($row->{date}),
-                _safe($row->{disease}), _safe($row->{tissue_of_origin}), _safe($row->{pathology_diagnosis}),
-                _safe($row->{matched_variant_count}), _safe($row->{matched_gene_count}), _safe($row->{matched_genes}), _safe($row->{matched_variant_types}),
-                _safe($row->{non_human_summary}),
-            );
-            print join("\t", @cols), "\n";
-        }
-    }
-    else {
-        print join("\t", qw(patient_group patient_id case_count latest_date report_ids panel_names diseases tissues pathologies matched_variant_count matched_gene_count matched_genes case_links)), "\n";
-        while (my $row = $sth->fetchrow_hashref) {
-            my @cols = (
-                _safe($row->{patient_group}), _safe($row->{patient_id_display}), _safe($row->{case_count}), _safe($row->{latest_date}),
-                _safe($row->{report_ids}), _safe($row->{panel_names}), _safe($row->{diseases}), _safe($row->{tissues}), _safe($row->{pathologies}),
-                _safe($row->{matched_variant_count}), _safe($row->{matched_gene_count}), _safe($row->{matched_genes}), _safe($row->{case_links}),
-            );
-            print join("\t", @cols), "\n";
-        }
-    }
-
-    $sth->finish;
-    $dbh->disconnect;
+    print join("\t", @cols), "\n";
+    for my $r (@rows) { print join("\t", map { _t($r->{$_}) } @cols), "\n"; }
     exit;
 }
 
+# ---------------------------------------------------------------------------
+# HTML
+# ---------------------------------------------------------------------------
 print $q->header(-type => 'text/html', -charset => 'utf-8');
-
-my $row_count = 0;
+my $row_count = scalar @rows;
 
 print <<'HTML';
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OncoUnify search results</title>
   <style>
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 1.2rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top, #eff6ff 0, #e0f2fe 35%, #f3f4f6 100%);
-      color: #111827;
-    }
-    a { color: #2563eb; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    .shell {
-      width: 100%;
-      max-width: none;
-      margin: 0;
-    }
-
-    .card {
-      width: 100%;
-      background: #ffffffee;
-      border-radius: 1rem;
-      padding: 1.2rem 1.4rem 1rem;
-      box-shadow:
-        0 18px 45px rgba(15, 23, 42, 0.16),
-        0 0 0 1px rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(4px);
-    }
-
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 1rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .title-block {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 1.35rem;
-      font-weight: 650;
-      color: #111827;
-      letter-spacing: 0.03em;
-    }
-
-    .subtitle {
-      font-size: 0.8rem;
-      color: #6b7280;
-    }
-
-    .meta-block {
-      text-align: right;
-      font-size: 0.78rem;
-      color: #6b7280;
-      line-height: 1.7;
-    }
-
-    .meta-link {
-      font-weight: 500;
-    }
-
-    .meta-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.15rem 0.6rem;
-      border-radius: 999px;
-      background: #eff6ff;
-      color: #1d4ed8;
-      border: 1px solid #bfdbfe;
-      margin-top: 0.25rem;
-    }
-    .meta-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: #22c55e;
-      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
-    }
-    .logout-link {
-      color: #b91c1c;
-      font-weight: 600;
-      margin-left: 0.5rem;
-    }
-
-    .filter-summary {
-      margin: 0.4rem 0 0.5rem;
-      padding: 0.45rem 0.75rem;
-      border-radius: 999px;
-      background: #f9fafb;
-      font-size: 0.78rem;
-      color: #4b5563;
-      display: inline-flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      align-items: center;
-      width: 100%;
-    }
-    .filter-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      padding: 0.1rem 0.5rem;
-      border-radius: 999px;
-      background: #e5f3ff;
-      color: #1d4ed8;
-    }
-    .filter-pill span.key { font-weight: 600; }
-
-    .download-form {
-      margin-left: auto;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .download-button {
-      border: none;
-      border-radius: 999px;
-      padding: 0.25rem 0.8rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      cursor: pointer;
-      background: linear-gradient(135deg, #0ea5e9, #2563eb);
-      color: #ffffff;
-      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
-    }
-
-    .table-wrapper {
-      margin-top: 0.4rem;
-      border-radius: 0.7rem;
-      border: 1px solid #e5e7eb;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
-      background: #f9fafb;
-      max-height: 72vh;
-      overflow-x: auto;
-      overflow-y: auto;
-    }
-
-    table {
-      width: max-content;
-      min-width: 100%;
-      border-collapse: collapse;
-      font-size: 0.8rem;
-    }
-
-    thead { background: #f9fafb; }
-
-    th, td {
-      padding: 0.35rem 0.45rem;
-      border-bottom: 1px solid #e5e7eb;
-      border-right: 1px solid #e5e7eb;
-      vertical-align: top;
-    }
-    th:last-child, td:last-child { border-right: none; }
-
-    th {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      font-weight: 600;
-      color: #374151;
-      text-align: left;
-      white-space: nowrap;
-      background: linear-gradient(120deg, #eff6ff, #e0f2fe);
-      background-clip: padding-box;
-    }
-
-    tbody tr:nth-child(even) td { background: #f3f4f6; }
-    tbody tr:hover td { background: #e0f2fe; }
-
+    body { margin: 0; padding: 1.2rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: radial-gradient(circle at top, #eff6ff 0, #e0f2fe 35%, #f3f4f6 100%); color: #111827; }
+    a { color: #2563eb; text-decoration: none; } a:hover { text-decoration: underline; }
+    .card { background: #ffffffee; border-radius: 1rem; padding: 1.2rem 1.4rem 1rem;
+            box-shadow: 0 18px 45px rgba(15,23,42,.16), 0 0 0 1px rgba(255,255,255,.85); }
+    .card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .75rem; }
+    h1 { margin: 0; font-size: 1.35rem; font-weight: 650; letter-spacing: .03em; }
+    .subtitle { font-size: .8rem; color: #6b7280; }
+    .meta-block { text-align: right; font-size: .78rem; color: #6b7280; }
+    .filter-summary { margin: .4rem 0 .5rem; padding: .45rem .75rem; border-radius: 999px; background: #f9fafb;
+                      font-size: .78rem; color: #4b5563; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+    .filter-pill { display: inline-flex; gap: .25rem; padding: .1rem .5rem; border-radius: 999px; background: #e5f3ff; color: #1d4ed8; }
+    .filter-pill .key { font-weight: 600; }
+    .download-form { margin-left: auto; }
+    .download-button { border: none; border-radius: 999px; padding: .25rem .8rem; font-size: .75rem; font-weight: 600;
+                       text-transform: uppercase; cursor: pointer; background: linear-gradient(135deg,#0ea5e9,#2563eb); color: #fff; }
+    .table-wrapper { margin-top: .4rem; border-radius: .7rem; border: 1px solid #e5e7eb; background: #f9fafb;
+                     max-height: 72vh; overflow: auto; }
+    table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .8rem; }
+    th, td { padding: .35rem .45rem; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb; vertical-align: top; }
+    th { position: sticky; top: 0; z-index: 2; font-weight: 600; color: #374151; text-align: left; white-space: nowrap;
+         background: linear-gradient(120deg,#eff6ff,#e0f2fe); }
+    tbody tr:nth-child(even) td { background: #f3f4f6; } tbody tr:hover td { background: #e0f2fe; }
     .num { text-align: right; white-space: nowrap; }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-    .gene-cell {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: #111827;
-    }
-    .panel-cell {
-      font-size: 0.76rem;
-      color: #4b5563;
-    }
-    .wrap-cell {
-      max-width: 420px;
-      min-width: 220px;
-      white-space: normal;
-      word-break: break-word;
-      overflow: visible;
-      text-overflow: clip;
-    }
-    .narrow-wrap {
-      max-width: 360px;
-      min-width: 180px;
-      white-space: normal;
-      word-break: break-word;
-    }
-
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 76px;
-      padding: 0.1rem 0.4rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      border: 1px solid transparent;
-    }
+    .mono, .gene { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .gene { font-weight: 600; }
+    .small { font-size: .72rem; color: #6b7280; }
+    .wrap { max-width: 360px; min-width: 160px; white-space: normal; word-break: break-word; }
+    .tag { display: inline-flex; justify-content: center; min-width: 76px; padding: .1rem .4rem; border-radius: 999px;
+           font-size: .7rem; font-weight: 600; text-transform: uppercase; border: 1px solid transparent; }
     .tag-snv { background: #eef2ff; color: #4f46e5; border-color: #c7d2fe; }
     .tag-cnv { background: #fef3c7; color: #92400e; border-color: #fde68a; }
     .tag-rearr { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
     .tag-exp { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-    .tag-bm { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
     .tag-default { background: #f3f4f6; color: #4b5563; border-color: #e5e7eb; }
-
-    .clin-sig { font-size: 0.72rem; color: #6b21a8; }
-    .clin-match { font-size: 0.7rem; color: #4b5563; }
-
-    .footer {
-      margin-top: 0.6rem;
-      font-size: 0.78rem;
-      color: #6b7280;
-      display: flex;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-    }
-    .footer strong { color: #111827; }
-    .empty-note {
-      padding: 1rem;
-      color: #6b7280;
-    }
-
-    @media (max-width: 768px) {
-      body { padding: 0.75rem; }
-      .card { padding: 1rem 1rem 0.9rem; }
-      .card-header { flex-direction: column; align-items: flex-start; }
-      .meta-block { text-align: left; }
-      .wrap-cell { min-width: 180px; }
-    }
+    .cq { display: inline-block; width: .6rem; height: .6rem; border-radius: 999px; margin-right: .3rem; }
+    .cq-missense { background: #4f46e5; } .cq-nonsense { background: #ef4444; } .cq-frameshift { background: #ec4899; }
+    .cq-splice { background: #0ea5e9; } .cq-inframe { background: #f59e0b; } .cq-other { background: #9ca3af; }
+    .cq-silent { background: #d1d5db; } .cq-noncoding { background: #e5e7eb; }
+    .footer { margin-top: .6rem; font-size: .78rem; color: #6b7280; display: flex; justify-content: space-between; }
+    .empty-note { padding: 1rem; color: #6b7280; }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <div class="card">
-      <div class="card-header">
-        <div class="title-block">
-          <h1>OncoUnify search results</h1>
-          <div class="subtitle">Cross-vendor results from FoundationOne, GenMineTOP, and Guardant.</div>
-        </div>
-        <div class="meta-block">
-          <div class="meta-link">
-            <a href="/panel/search.html">Modify search</a>
-            <a class="logout-link" href="/cgi-bin/logout.cgi">Logout</a>
-          </div>
-          <div class="meta-chip">
-            <span class="meta-dot"></span>
-            Result viewer
-          </div>
-        </div>
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h1>OncoUnify search results</h1>
+        <div class="subtitle">Cross-vendor results over the canonical OncoUnify schema.</div>
       </div>
 HTML
+print qq{      <div class="meta-block"><a href="} . _h("$HTML_URL/search.html") . qq{">Modify search</a></div>\n    </div>\n};
 
-print qq{      <div class="filter-summary">\n};
-print qq{        <span class="filter-pill"><span class="key">View</span><span>} . _h(_view_label($view_mode)) . qq{</span></span>\n};
-if ($gene ne '') {
-    print qq{        <span class="filter-pill"><span class="key">Gene</span><span>} . _h($gene) . qq{</span></span>\n};
-}
-if ($protein_effect ne '') {
-    print qq{        <span class="filter-pill"><span class="key">Protein</span><span>} . _h($protein_effect) . qq{</span></span>\n};
-}
-if ($patient_id ne '') {
-    print qq{        <span class="filter-pill"><span class="key">Patient ID</span><span>} . _h($patient_id) . qq{</span></span>\n};
-}
-if ($variant_type ne '') {
-    print qq{        <span class="filter-pill"><span class="key">Type</span><span>} . _h($variant_type) . qq{</span></span>\n};
-}
-if ($disease ne '') {
-    print qq{        <span class="filter-pill"><span class="key">Disease/Tissue</span><span>} . _h($disease) . qq{</span></span>\n};
-}
-if ($panel_name ne '') {
-    print qq{        <span class="filter-pill"><span class="key">Panel</span><span>} . _h($panel_name) . qq{</span></span>\n};
-}
-print qq{        <span class="filter-pill"><span class="key">Limit</span><span>} . _h($limit) . qq{ rows</span></span>\n};
+my @pills = (['View', _view_label($view_mode)]);
+push @pills, ['Gene', $gene . ($gene_match eq 'substring' ? ' (substring)' : '')] if $gene ne '';
+push @pills, ['Protein', $protein_effect . ' → ' . canonical_protein($protein_effect)] if $protein_effect ne '';
+push @pills, ['Consequence', $consequence] if $consequence ne '';
+push @pills, ['Patient ID', $patient_id] if $patient_id ne '';
+push @pills, ['Type', $variant_type] if $variant_type ne '';
+push @pills, ['Disease/Tissue', $disease] if $disease ne '';
+push @pills, ['Panel', $panel_name] if $panel_name ne '';
+push @pills, ['Uncalled rows', 'included'] if $include_uncalled;
+push @pills, ['Limit', "$limit rows"];
 
-print qq{
-        <form class="download-form" method="get" action="/cgi-bin/panel_search.cgi">
-          <input type="hidden" name="gene" value="} . _h($gene) . qq{" />
-          <input type="hidden" name="protein_effect" value="} . _h($protein_effect) . qq{" />
-          <input type="hidden" name="patient_id" value="} . _h($patient_id) . qq{" />
-          <input type="hidden" name="variant_type" value="} . _h($variant_type) . qq{" />
-          <input type="hidden" name="disease" value="} . _h($disease) . qq{" />
-          <input type="hidden" name="panel_name" value="} . _h($panel_name) . qq{" />
-          <input type="hidden" name="view_mode" value="} . _h($view_mode) . qq{" />
-          <input type="hidden" name="limit" value="} . _h($limit) . qq{" />
-          <input type="hidden" name="download" value="tsv" />
-          <button type="submit" class="download-button">Download TSV</button>
-        </form>
-};
-print qq{      </div>\n};
+print qq{    <div class="filter-summary">\n};
+print qq{      <span class="filter-pill"><span class="key">} . _h($_->[0]) . qq{</span><span>} . _h($_->[1]) . qq{</span></span>\n} for @pills;
+print qq{      <form class="download-form" method="get" action="} . _h("$CGI_URL/panel_search.cgi") . qq{">\n};
+for my $k (qw(gene gene_match protein_effect consequence patient_id variant_type disease panel_name include_uncalled view_mode limit)) {
+    my $v = _p($k);
+    next if $v eq '';
+    print qq{        <input type="hidden" name="} . _h($k) . qq{" value="} . _h($v) . qq{">\n};
+}
+print qq{        <input type="hidden" name="download" value="tsv"><button type="submit" class="download-button">Download TSV</button>\n};
+print qq{      </form>\n    </div>\n    <div class="table-wrapper">\n};
 
-print qq{      <div class="table-wrapper">\n};
+sub _case_link {
+    my ($cid, $label) = @_;
+    return qq{<a href="} . _h("$CGI_URL/case_detail.cgi?case_id=$cid") . qq{">} . _h($label) . qq{</a>};
+}
 
 if ($view_mode eq 'variant') {
-    print <<'HTML';
-        <table>
-          <thead>
-            <tr>
-              <th>case_id</th>
-              <th>panel</th>
-              <th>report_id</th>
-              <th>patient_id</th>
-              <th>disease / tissue</th>
-              <th>pathology</th>
-              <th>gene</th>
-              <th>variant_type</th>
-              <th>subtype</th>
-              <th>cDNA</th>
-              <th>protein</th>
-              <th>strand</th>
-              <th>transcript</th>
-              <th>func_effect</th>
-              <th>status</th>
-              <th>origin</th>
-              <th>class</th>
-              <th>AF</th>
-              <th>depth</th>
-              <th>copy#</th>
-              <th>CNV ratio</th>
-              <th>ClinVar</th>
-              <th>MAF (1KG / HGVD / ToMMo)</th>
-              <th>TPM (tumor)</th>
-              <th>TPM normal (mean±SD)</th>
-              <th>Non-human</th>
-            </tr>
-          </thead>
-          <tbody>
-HTML
-
-    while (my $row = $sth->fetchrow_hashref) {
-        $row_count++;
-        my $af  = defined $row->{allele_fraction} ? sprintf('%.4f', $row->{allele_fraction}) : '';
-        my $cn  = defined $row->{copy_number} ? sprintf('%.2f', $row->{copy_number}) : '';
-        my $cnr = defined $row->{cnv_ratio} ? sprintf('%.2f', $row->{cnv_ratio}) : '';
-
-        my $disease_text = join(' / ', grep { length $_ } map { _safe($_) } ($row->{disease}, $row->{tissue_of_origin}));
-        my $badge_html = _type_badge($row->{variant_type});
-
-        my $clinvar_cell = '';
-        if (_safe($row->{clinvar_id}) ne '') {
-            my $url = 'https://www.ncbi.nlm.nih.gov/clinvar/variation/' . _safe($row->{clinvar_id});
-            $clinvar_cell = qq{<a href="} . _h($url) . qq{" target="_blank" rel="noopener">} . _h($row->{clinvar_id}) . qq{</a>};
-            $clinvar_cell .= qq{<br><span class="clin-sig">} . _h($row->{clinvar_sig}) . qq{</span>} if _safe($row->{clinvar_sig}) ne '';
-            $clinvar_cell .= qq{<br><span class="clin-match">} . _h($row->{clinvar_match}) . qq{</span>} if _safe($row->{clinvar_match}) ne '';
+    print qq{<table><thead><tr>} . join('', map { "<th>$_</th>" }
+        ('case', 'panel', 'report', 'patient', 'disease / OncoTree', 'gene', 'partner', 'type', 'subtype',
+         'location (build)', 'cDNA', 'protein', 'consequence (SO)', 'status', 'origin', 'AF', 'depth',
+         'copy#', 'ClinVar', 'MAF (1KG / HGVD / ToMMo)', 'TPM tumor', 'TPM normal (mean±SD)', 'non-human'))
+        . qq{</tr></thead><tbody>\n};
+    for my $r (@rows) {
+        my $dis = join(' / ', grep { length } map { _safe($_) } ($r->{disease} // $r->{pathology_diagnosis}, $r->{oncotree_code}));
+        my $loc = _loc($r);
+        $loc .= ' (' . _safe($r->{genome_build}) . ')' if $loc ne '';
+        my $protein = _safe($r->{hgvs_p});
+        my $prot_cell = $protein ne '' ? qq{<span title="vendor: } . _h($r->{protein_effect}) . qq{">} . _h($protein) . '</span>'
+                                       : '<span class="small">' . _h($r->{protein_effect}) . '</span>';
+        my $cq = '';
+        if (_safe($r->{functional_effect}) ne '') {
+            my $g = _safe($r->{display_group}) || 'other';
+            $cq = qq{<span class="cq cq-$g"></span>} . _h($r->{functional_effect})
+                . qq{<br><span class="small">} . _h($r->{functional_effect_so}) . ' · ' . _h($r->{functional_effect_source}) . '</span>';
         }
-
-        my @maf_parts;
-        push @maf_parts, '1KG: '   . sprintf('%.4g', $row->{maf_1kg})   if defined $row->{maf_1kg};
-        push @maf_parts, 'HGVD: '  . sprintf('%.4g', $row->{maf_hgvd})  if defined $row->{maf_hgvd};
-        push @maf_parts, 'ToMMo: ' . sprintf('%.4g', $row->{maf_tommo}) if defined $row->{maf_tommo};
-        my $maf_cell = join('<br>', map { _h($_) } @maf_parts);
-
-        my $tpm_tumor = defined $row->{tpm} ? sprintf('%.2f', $row->{tpm}) : '';
-        my $tpm_norm_cell = '';
-        if (defined $row->{tpm_normal_mean}) {
-            $tpm_norm_cell = sprintf('%.2f', $row->{tpm_normal_mean});
-            $tpm_norm_cell .= ' ± ' . sprintf('%.2f', $row->{tpm_normal_sd}) if defined $row->{tpm_normal_sd};
+        my $clin = '';
+        if (_safe($r->{clinvar_id}) ne '') {
+            $clin = qq{<a href="} . _h('https://www.ncbi.nlm.nih.gov/clinvar/variation/' . $r->{clinvar_id}) . qq{" target="_blank" rel="noopener">}
+                  . _h($r->{clinvar_id}) . '</a>';
+            $clin .= '<br><span class="small">' . _h($r->{clinvar_sig}) . '</span>' if _safe($r->{clinvar_sig}) ne '';
         }
-
-        my $cid = _safe($row->{case_id});
-        my $rid = _safe($row->{report_id});
-        my $detail_url = "/cgi-bin/case_detail.cgi?case_id=$cid";
-
-        print "<tr>";
-        print qq{<td class="num">} . _h($cid) . qq{</td>};
-        print qq{<td class="panel-cell">} . _h($row->{panel_name}) . qq{</td>};
-        print $rid ne '' ? qq{<td><a href="} . _h($detail_url) . qq{">} . _h($rid) . qq{</a></td>} : qq{<td></td>};
-        print qq{<td>} . _h($row->{patient_id}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($disease_text) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{pathology_diagnosis}) . qq{</td>};
-        print qq{<td class="gene-cell">} . _h($row->{gene}) . qq{</td>};
-        print qq{<td>$badge_html</td>};
-        print qq{<td>} . _h($row->{variant_subtype}) . qq{</td>};
-        print qq{<td class="mono">} . _h($row->{cds_effect}) . qq{</td>};
-        print qq{<td class="mono">} . _h($row->{protein_effect}) . qq{</td>};
-        print qq{<td>} . _h($row->{strand}) . qq{</td>};
-        print qq{<td class="mono">} . _h($row->{transcript}) . qq{</td>};
-        print qq{<td>} . _h($row->{functional_effect}) . qq{</td>};
-        print qq{<td>} . _h($row->{status}) . qq{</td>};
-        print qq{<td>} . _h($row->{origin}) . qq{</td>};
-        print qq{<td>} . _h($row->{classification}) . qq{</td>};
-        print qq{<td class="num">} . _h($af) . qq{</td>};
-        print qq{<td class="num">} . _h($row->{depth}) . qq{</td>};
-        print qq{<td class="num">} . _h($cn) . qq{</td>};
-        print qq{<td class="num">} . _h($cnr) . qq{</td>};
-        print qq{<td>} . $clinvar_cell . qq{</td>};
-        print qq{<td class="narrow-wrap">} . $maf_cell . qq{</td>};
-        print qq{<td class="num">} . _h($tpm_tumor) . qq{</td>};
-        print qq{<td class="num">} . _h($tpm_norm_cell) . qq{</td>};
-        print qq{<td class="narrow-wrap">} . _h($row->{non_human_summary}) . qq{</td>};
-        print "</tr>\n";
+        my $maf = join('<br>', map { _h($_) } grep { defined }
+            (defined $r->{maf_1kg} ? '1KG ' . sprintf('%.4g', $r->{maf_1kg}) : undef,
+             defined $r->{maf_hgvd} ? 'HGVD ' . sprintf('%.4g', $r->{maf_hgvd}) : undef,
+             defined $r->{maf_tommo} ? 'ToMMo ' . sprintf('%.4g', $r->{maf_tommo}) : undef));
+        my $tpmn = defined $r->{tpm_normal_mean}
+            ? sprintf('%.2f', $r->{tpm_normal_mean}) . (defined $r->{tpm_normal_sd} ? ' ± ' . sprintf('%.2f', $r->{tpm_normal_sd}) : '') : '';
+        my $cn = _num($r->{copy_number}, '%.2f');
+        $cn .= ' ' . $r->{cnv_type} if _safe($r->{cnv_type}) ne '';
+        print '<tr>',
+            '<td class="num">', _h($r->{case_id}), '</td>',
+            '<td>', _h($r->{panel_name}), '</td>',
+            '<td>', _case_link($r->{case_id}, _safe($r->{report_id})), '</td>',
+            '<td class="mono">', _h($r->{patient_id}), '</td>',
+            '<td class="wrap">', _h($dis), '</td>',
+            '<td class="gene">', _h($r->{gene}), '</td>',
+            '<td class="gene">', _h($r->{other_gene}), '</td>',
+            '<td>', _type_badge($r->{variant_type}), '</td>',
+            '<td>', _h($r->{variant_subtype}), '</td>',
+            '<td class="mono">', _h($loc), '</td>',
+            '<td class="mono">', _h($r->{hgvs_c}), '<br><span class="small">', _h($r->{transcript}), '</span></td>',
+            '<td class="mono">', $prot_cell, '</td>',
+            '<td>', $cq, '</td>',
+            '<td>', _h($r->{status}), '</td>',
+            '<td>', _h($r->{origin}), '</td>',
+            '<td class="num">', _h(_num($r->{allele_fraction}, '%.4f')), '</td>',
+            '<td class="num">', _h($r->{depth}), '</td>',
+            '<td class="num">', _h($cn), '</td>',
+            '<td>', $clin, '</td>',
+            '<td class="wrap">', $maf, '</td>',
+            '<td class="num">', _h(_num($r->{tpm}, '%.2f')), '</td>',
+            '<td class="num">', _h($tpmn), '</td>',
+            '<td class="wrap">', _h($r->{non_human_summary}), '</td>',
+            "</tr>\n";
     }
     print "</tbody></table>\n";
-}
-elsif ($view_mode eq 'case') {
-    print <<'HTML';
-        <table>
-          <thead>
-            <tr>
-              <th>case_id</th>
-              <th>panel</th>
-              <th>report_id</th>
-              <th>patient_id</th>
-              <th>date</th>
-              <th>disease / tissue</th>
-              <th>pathology</th>
-              <th>matched variants</th>
-              <th>matched genes</th>
-              <th>gene list</th>
-              <th>variant types</th>
-              <th>Non-human</th>
-            </tr>
-          </thead>
-          <tbody>
-HTML
-    while (my $row = $sth->fetchrow_hashref) {
-        $row_count++;
-        my $cid = _safe($row->{case_id});
-        my $rid = _safe($row->{report_id});
-        my $detail_url = "/cgi-bin/case_detail.cgi?case_id=$cid";
-        my $disease_text = join(' / ', grep { length $_ } map { _safe($_) } ($row->{disease}, $row->{tissue_of_origin}));
-
-        print "<tr>";
-        print qq{<td class="num">} . _h($cid) . qq{</td>};
-        print qq{<td class="panel-cell">} . _h($row->{panel_name}) . qq{</td>};
-        print $rid ne '' ? qq{<td><a href="} . _h($detail_url) . qq{">} . _h($rid) . qq{</a></td>} : qq{<td></td>};
-        print qq{<td>} . _h($row->{patient_id}) . qq{</td>};
-        print qq{<td class="mono">} . _h($row->{date}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($disease_text) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{pathology_diagnosis}) . qq{</td>};
-        print qq{<td class="num">} . _h($row->{matched_variant_count}) . qq{</td>};
-        print qq{<td class="num">} . _h($row->{matched_gene_count}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{matched_genes}) . qq{</td>};
-        print qq{<td>} . _h($row->{matched_variant_types}) . qq{</td>};
-        print qq{<td class="narrow-wrap">} . _h($row->{non_human_summary}) . qq{</td>};
-        print "</tr>\n";
+} elsif ($view_mode eq 'case') {
+    print qq{<table><thead><tr>} . join('', map { "<th>$_</th>" }
+        ('case', 'panel', 'report', 'patient', 'date', 'build', 'disease', 'OncoTree', 'tissue', 'pathology',
+         'matched variants', 'matched genes', 'gene list', 'variant types', 'TMB / MSI', 'non-human'))
+        . qq{</tr></thead><tbody>\n};
+    for my $r (@rows) {
+        print '<tr>',
+            '<td class="num">', _h($r->{case_id}), '</td>',
+            '<td>', _h($r->{panel_name}), '</td>',
+            '<td>', _case_link($r->{case_id}, _safe($r->{report_id})), '</td>',
+            '<td class="mono">', _h($r->{patient_id}), '</td>',
+            '<td class="mono">', _h($r->{date}), '</td>',
+            '<td>', _h($r->{genome_build}), '</td>',
+            '<td class="wrap">', _h($r->{disease}), '</td>',
+            '<td>', _h($r->{oncotree_code}), '</td>',
+            '<td>', _h($r->{tissue_of_origin}), '</td>',
+            '<td class="wrap">', _h($r->{pathology_diagnosis}), '</td>',
+            '<td class="num">', _h($r->{matched_variant_count}), '</td>',
+            '<td class="num">', _h($r->{matched_gene_count}), '</td>',
+            '<td class="wrap gene">', _h($r->{matched_genes}), '</td>',
+            '<td>', _h($r->{matched_variant_types}), '</td>',
+            '<td class="wrap">', _h($r->{biomarker_summary}), '</td>',
+            '<td class="wrap">', _h($r->{non_human_summary}), '</td>',
+            "</tr>\n";
     }
     print "</tbody></table>\n";
-}
-else {
-    print <<'HTML';
-        <table>
-          <thead>
-            <tr>
-              <th>patient</th>
-              <th>case count</th>
-              <th>latest date</th>
-              <th>reports</th>
-              <th>panels</th>
-              <th>disease</th>
-              <th>tissue</th>
-              <th>pathology</th>
-              <th>matched variants</th>
-              <th>matched genes</th>
-              <th>gene list</th>
-            </tr>
-          </thead>
-          <tbody>
-HTML
-    while (my $row = $sth->fetchrow_hashref) {
-        $row_count++;
-        my $patient_disp = _safe($row->{patient_id_display});
-        $patient_disp = _safe($row->{patient_group}) if $patient_disp eq '';
-
-        print "<tr>";
-        print qq{<td class="mono">} . _h($patient_disp) . qq{</td>};
-        print qq{<td class="num">} . _h($row->{case_count}) . qq{</td>};
-        print qq{<td class="mono">} . _h($row->{latest_date}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _render_case_links($row->{case_links}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{panel_names}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{diseases}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{tissues}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{pathologies}) . qq{</td>};
-        print qq{<td class="num">} . _h($row->{matched_variant_count}) . qq{</td>};
-        print qq{<td class="num">} . _h($row->{matched_gene_count}) . qq{</td>};
-        print qq{<td class="wrap-cell">} . _h($row->{matched_genes}) . qq{</td>};
-        print "</tr>\n";
+} else {
+    print qq{<table><thead><tr>} . join('', map { "<th>$_</th>" }
+        ('patient', 'cases', 'latest date', 'reports', 'panels', 'disease', 'OncoTree', 'tissue', 'pathology',
+         'matched variants', 'matched genes', 'gene list'))
+        . qq{</tr></thead><tbody>\n};
+    for my $r (@rows) {
+        my @links;
+        for my $item (split /,/, _safe($r->{case_links})) {
+            my ($cid, $rid, $pn) = split /\|/, $item, 3;
+            next unless defined $cid && $cid =~ /^\d+$/;
+            push @links, _case_link($cid, (_safe($rid) ne '' ? $rid : "case:$cid")) . ' <span class="small">' . _h($pn) . '</span>';
+        }
+        print '<tr>',
+            '<td class="mono">', _h($r->{patient_group}), '</td>',
+            '<td class="num">', _h($r->{case_count}), '</td>',
+            '<td class="mono">', _h($r->{latest_date}), '</td>',
+            '<td class="wrap">', join('<br>', @links), '</td>',
+            '<td class="wrap">', _h($r->{panel_names}), '</td>',
+            '<td class="wrap">', _h($r->{diseases}), '</td>',
+            '<td>', _h($r->{oncotree_codes}), '</td>',
+            '<td class="wrap">', _h($r->{tissues}), '</td>',
+            '<td class="wrap">', _h($r->{pathologies}), '</td>',
+            '<td class="num">', _h($r->{matched_variant_count}), '</td>',
+            '<td class="num">', _h($r->{matched_gene_count}), '</td>',
+            '<td class="wrap gene">', _h($r->{matched_genes}), '</td>',
+            "</tr>\n";
     }
     print "</tbody></table>\n";
 }
 
-if ($row_count == 0) {
-    print qq{<div class="empty-note">No matching results.</div>};
-}
-
-print qq{      </div>\n};
-print qq{      <div class="footer"><div><strong>$row_count</strong> rows shown (limit: } . _h($limit) . qq{).</div><div>} . _h(_view_label($view_mode)) . qq{ view</div></div>\n};
-print qq{    </div>\n  </div>\n</body>\n</html>\n};
-
-$sth->finish;
-$dbh->disconnect;
+print qq{<div class="empty-note">No matching results.</div>} if $row_count == 0;
+print qq{    </div>\n    <div class="footer"><div><strong>$row_count</strong> rows shown (limit } . _h($limit)
+    . qq{).</div><div>} . _h(_view_label($view_mode)) . qq{ view</div></div>\n  </div>\n</body>\n</html>\n};

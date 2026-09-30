@@ -1,153 +1,79 @@
 #!/usr/bin/perl
+# suggest.cgi — autocomplete endpoint returning {"items": [...]} (read-only).
+#   type=gene     prefix match on variants.gene and variants.other_gene
+#   type=protein  prefix match on the canonical protein key (variants.hgvs_p)
+#   type=disease  prefix-then-substring match on the case-level disease columns
+#   type=panel    list of panel names present in the database (q ignored)
+# Configuration: ONCOUNIFY_DB (see panel_search.cgi).
 use strict;
 use warnings;
 use utf8;
 use CGI qw(:standard);
 use DBI;
 use DBD::SQLite ();
+use JSON::PP ();
 
 binmode(STDOUT, ':encoding(UTF-8)');
 
-my $DB_FILE = '/var/www/data/panels.db';
+my $DB_FILE = $ENV{ONCOUNIFY_DB} || '/var/www/data/panels.db';
 
 my $q = CGI->new;
 my $type  = lc($q->param('type') // '');
 my $query = $q->param('q') // '';
 my $limit = $q->param('limit') // 30;
-
 $query =~ s/^\s+|\s+$//g;
-$limit = 30 if $limit !~ /^\d+$/;
+$limit = 30 if $limit !~ /^\d+$/ || $limit < 1;
 $limit = 100 if $limit > 100;
 
-# JSON output
 print $q->header(-type => 'application/json', -charset => 'utf-8');
+my $JSON = JSON::PP->new->utf8(0)->canonical(1);
+sub emit { print $JSON->encode({ items => [@_] }); exit; }
 
-sub json_escape {
-  my ($s) = @_;
-  $s //= '';
-  $s =~ s/\\/\\\\/g;
-  $s =~ s/"/\\"/g;
-  $s =~ s/\r/\\r/g;
-  $s =~ s/\n/\\n/g;
-  $s =~ s/\t/\\t/g;
-  return $s;
-}
+sub _like { my $s = shift; $s =~ s/([\\%_])/\\$1/g; return $s; }
 
-sub emit_json {
-  my (@items) = @_;
-  my $arr = join(",", map { '"' . json_escape($_) . '"' } @items);
-  print qq|{"items":[${arr}]}|;
-}
+my %AA3 = (Ala=>'A',Arg=>'R',Asn=>'N',Asp=>'D',Cys=>'C',Gln=>'Q',Glu=>'E',Gly=>'G',His=>'H',Ile=>'I',
+           Leu=>'L',Lys=>'K',Met=>'M',Phe=>'F',Pro=>'P',Ser=>'S',Thr=>'T',Trp=>'W',Tyr=>'Y',Val=>'V',Ter=>'*');
+my $AA3_RE = join('|', sort { length($b) <=> length($a) } keys %AA3);
 
-if ($query eq '') { emit_json(); exit; }
+emit() if $query eq '' && $type ne 'panel';
+emit() unless -r $DB_FILE;
+my $dbh = eval {
+    DBI->connect("dbi:SQLite:dbname=$DB_FILE", '', '', {
+        RaiseError => 1, PrintError => 0, sqlite_unicode => 1, AutoCommit => 1, ReadOnly => 1,
+        sqlite_open_flags => DBD::SQLite::OPEN_READONLY(),
+    });
+} or emit();
 
-my $dbh = DBI->connect(
-  "dbi:SQLite:dbname=$DB_FILE", "", "",
-  {
-    RaiseError => 1,
-    sqlite_unicode => 1,
-    AutoCommit => 1,
-    ReadOnly => 1,
-    sqlite_open_flags => DBD::SQLite::OPEN_READONLY(),
-  }
-) or do { emit_json(); exit; };
-
-my @items;
-
+my $items = [];
 if ($type eq 'gene') {
-  # gene: prefix match (case-sensitivity depends on SQLite LIKE; ASCII names are fine)
-  my $sth = $dbh->prepare(<<'SQL');
-SELECT gene
-FROM variants
-WHERE gene IS NOT NULL AND TRIM(gene) != ''
-  AND gene LIKE ?
-GROUP BY gene
-ORDER BY gene
-LIMIT ?
+    my $p = _like(uc $query) . '%';
+    $items = $dbh->selectcol_arrayref(<<'SQL', undef, $p, $p, $limit);
+SELECT g FROM (
+  SELECT gene AS g FROM variants WHERE gene LIKE ? ESCAPE '\'
+  UNION
+  SELECT other_gene AS g FROM variants WHERE other_gene LIKE ? ESCAPE '\'
+) WHERE g IS NOT NULL AND g != '' ORDER BY g LIMIT ?
 SQL
-  $sth->execute($query . "%", $limit);
-  while (my ($v) = $sth->fetchrow_array) { push @items, $v; }
-  $sth->finish;
-
 } elsif ($type eq 'protein') {
-  # protein: tolerate optional "p." prefix and collect candidates broadly
-  my $norm = $query;
-  $norm =~ s/^\s*p\.?\s*//i;  # strip leading 'p.' / 'p' prefix
-  $norm =~ s/\s+//g;
-
-  my @patterns;
-  push @patterns, $query . "%";
-  push @patterns, $norm . "%";
-  push @patterns, "p." . $norm . "%";
-  push @patterns, "p" . $norm . "%";
-
-  my %seen; @patterns = grep { !$seen{$_}++ } @patterns;
-
-  my $or = join(" OR ", map { "protein_effect LIKE ?" } @patterns);
-
-  my $sql = "SELECT protein_effect
-             FROM variants
-             WHERE protein_effect IS NOT NULL AND TRIM(protein_effect) != ''
-               AND ($or)
-             GROUP BY protein_effect
-             ORDER BY protein_effect
-             LIMIT ?";
-
-  my $sth = $dbh->prepare($sql);
-  $sth->execute(@patterns, $limit);
-  while (my ($v) = $sth->fetchrow_array) { push @items, $v; }
-  $sth->finish;
-
+    my $s = $query;
+    $s =~ s/\s+//g;
+    $s =~ s/^\(?p\.//;
+    $s =~ s/^p(?=[A-Z*(])//;
+    $s =~ s/($AA3_RE)/$AA3{$1}/g;
+    $items = $dbh->selectcol_arrayref(
+        "SELECT DISTINCT hgvs_p FROM variants WHERE hgvs_p LIKE ? ESCAPE '\\' ORDER BY hgvs_p LIMIT ?",
+        undef, 'p.' . _like($s) . '%', $limit);
 } elsif ($type eq 'disease') {
-  # disease: collect candidates from three case columns (prefix first, also substring)
-  my $pat_prefix = $query . "%";
-  my $pat_like   = "%" . $query . "%";
-
-  my $sql = <<'SQL';
-SELECT val FROM (
-  SELECT disease AS val, 1 AS pri
-    FROM cases
-   WHERE disease IS NOT NULL AND TRIM(disease) != '' AND disease LIKE ?
-  UNION
-  SELECT tissue_of_origin AS val, 1 AS pri
-    FROM cases
-   WHERE tissue_of_origin IS NOT NULL AND TRIM(tissue_of_origin) != '' AND tissue_of_origin LIKE ?
-  UNION
-  SELECT pathology_diagnosis AS val, 1 AS pri
-    FROM cases
-   WHERE pathology_diagnosis IS NOT NULL AND TRIM(pathology_diagnosis) != '' AND pathology_diagnosis LIKE ?
-  UNION
-  SELECT disease AS val, 2 AS pri
-    FROM cases
-   WHERE disease IS NOT NULL AND TRIM(disease) != '' AND disease LIKE ?
-  UNION
-  SELECT tissue_of_origin AS val, 2 AS pri
-    FROM cases
-   WHERE tissue_of_origin IS NOT NULL AND TRIM(tissue_of_origin) != '' AND tissue_of_origin LIKE ?
-  UNION
-  SELECT pathology_diagnosis AS val, 2 AS pri
-    FROM cases
-   WHERE pathology_diagnosis IS NOT NULL AND TRIM(pathology_diagnosis) != '' AND pathology_diagnosis LIKE ?
-)
-GROUP BY val
-ORDER BY pri, val
-LIMIT ?
-SQL
-
-  my $sth = $dbh->prepare($sql);
-  $sth->execute($pat_prefix, $pat_prefix, $pat_prefix,
-                $pat_like,   $pat_like,   $pat_like,
-                $limit);
-  while (my ($v) = $sth->fetchrow_array) { push @items, $v; }
-  $sth->finish;
-
-} else {
-  # unknown type
-  $dbh->disconnect;
-  emit_json();
-  exit;
+    my ($pre, $sub) = (_like($query) . '%', '%' . _like($query) . '%');
+    my @cols = qw(disease oncotree_code disease_ontology tissue_of_origin pathology_diagnosis);
+    my $union = join("\n  UNION ALL\n", map {
+        "SELECT $_ AS val, CASE WHEN $_ LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END AS pri FROM cases WHERE $_ LIKE ? ESCAPE '\\'"
+    } @cols);
+    $items = $dbh->selectcol_arrayref(
+        "SELECT val FROM ($union) WHERE val IS NOT NULL AND TRIM(val) != '' GROUP BY val ORDER BY MIN(pri), val LIMIT ?",
+        undef, (map { ($pre, $sub) } @cols), $limit);
+} elsif ($type eq 'panel') {
+    $items = $dbh->selectcol_arrayref('SELECT DISTINCT panel_name FROM cases ORDER BY panel_name');
 }
-
 $dbh->disconnect;
-emit_json(@items);
-
+emit(@$items);
