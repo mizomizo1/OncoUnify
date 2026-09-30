@@ -1,1 +1,24 @@
-/.DS_Store
+# macOS / editor noise
+.DS_Store
+**/.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Databases produced by the loaders (never commit real registries)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Local, non-shareable inputs. Real vendor reports must never be placed
+# inside this repository; keep them outside the working tree.
+private/
+tests/data_private/
+data/
