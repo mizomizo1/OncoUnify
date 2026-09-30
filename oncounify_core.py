@@ -159,22 +159,19 @@ def to_json(d: Optional[Dict[str, Any]]) -> Optional[str]:
     return json.dumps(kept, ensure_ascii=False, sort_keys=True)
 
 
-# Previous HGNC symbols used by the supported vendors -> current approved
-# symbol (HGNC complete set, accessed 2026-09-30).  Mirrors the gene_symbol_map
-# table in schema.sql.
-GENE_SYMBOL_MAP: Dict[str, str] = {
-    "C11orf30": "EMSY",
-    "C17orf39": "GID4",
-    "FAM46C": "TENT5C",
-    "H3F3A": "H3-3A",
-    "MRE11A": "MRE11",
-    "PARK2": "PRKN",
-    "WHSC1": "NSD2",
-    "WHSC1L1": "NSD3",
-    "FAM118B": "SIRAL1",
-    "SLC22A18": "SLC67A1",
-    "STK19": "WHR1",
-}
+def _read_symbol_map(path: Path) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and not line.startswith("previous_symbol\t"):
+            prev, cur = line.split("\t")
+            out[prev] = cur
+    return out
+
+
+# Previous HGNC symbols of the genes in the supported assays -> current
+# approved symbol, from gene_symbol_map.tsv (written by tools/make_symbol_map.py
+# from the HGNC complete set).  init_db copies it into the gene_symbol_map table.
+GENE_SYMBOL_MAP: Dict[str, str] = _read_symbol_map(Path(__file__).with_name("gene_symbol_map.tsv"))
 
 
 def current_symbol(symbol: Optional[str]) -> Optional[str]:
@@ -799,7 +796,10 @@ def init_db(conn: sqlite3.Connection) -> None:
     if has_cases and version > SCHEMA_VERSION:
         raise SystemExit(f"[FATAL] database schema version {version} is newer than this loader ({SCHEMA_VERSION}).")
     conn.executescript(schema_path().read_text(encoding="utf-8"))
-    conn.commit()
+    with conn:
+        conn.execute("DELETE FROM gene_symbol_map")
+        conn.executemany("INSERT INTO gene_symbol_map (previous_symbol, symbol) VALUES (?, ?)",
+                         sorted(GENE_SYMBOL_MAP.items()))
 
 
 def _check_keys(rows: Iterable[Dict[str, Any]], allowed: Sequence[str], what: str) -> None:

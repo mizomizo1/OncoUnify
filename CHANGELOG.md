@@ -52,8 +52,11 @@ reports or upgraded with `migrate_db.py`.
 - Official gene lists for FoundationOne CDx, FoundationOne Liquid CDx,
   GenMineTOP and Guardant360 CDx (Japan) extracted from public vendor
   documents and checked against HGNC.
-- Previous HGNC symbols used by vendors are harmonized to current symbols
-  (`gene_symbol_map`), in variants and gene lists; searches resolve them.
+- Previous HGNC symbols are harmonized to current symbols
+  (`gene_symbol_map`, 599 unambiguous previous symbols of the genes in the
+  supported assays, generated from the HGNC complete set by
+  `tools/make_symbol_map.py`), in variants and gene lists; searches resolve
+  them.
 
 ### Packaging
 - MIT LICENSE file, Dockerfile and docker-compose demo, GitHub Actions CI,

@@ -65,6 +65,11 @@ def report(db: str, examples: int = 0) -> dict:
         "patients_with_reports_from_2_or_more_assays": q(
             conn, "SELECT COUNT(*) FROM (SELECT patient_id FROM cases WHERE patient_id IS NOT NULL "
                   "GROUP BY patient_id HAVING COUNT(DISTINCT panel_name) >= 2)")[0][0],
+        "patients_with_2_or_more_reports": q(
+            conn, "SELECT COUNT(*) FROM (SELECT patient_id FROM cases WHERE patient_id IS NOT NULL "
+                  "GROUP BY patient_id HAVING COUNT(*) >= 2)")[0][0],
+        "reports_without_patient_id_by_panel": dict(q(
+            conn, "SELECT panel_name, COUNT(*) FROM cases WHERE patient_id IS NULL GROUP BY 1 ORDER BY 1")),
     }
     skipped = 0
     for (info,) in q(conn, "SELECT other_info FROM cases WHERE panel_name LIKE 'Guardant%' AND other_info IS NOT NULL"):
@@ -90,7 +95,17 @@ def report(db: str, examples: int = 0) -> dict:
         "reports_with_gene_list": q(conn, "SELECT COUNT(*) FROM cases c WHERE EXISTS (SELECT 1 FROM panel_versions pv "
                                           "WHERE pv.panel_name = c.panel_name AND pv.panel_version = c.panel_version)")[0][0],
         "reports": n_cases,
+        "lists": [dict(zip(("panel_name", "panel_version", "genes", "short_variant_genes", "reports", "description"), r))
+                  for r in q(conn, "SELECT pv.panel_name, pv.panel_version, "
+                                   "(SELECT COUNT(*) FROM panel_genes pg WHERE pg.panel_version_id = pv.panel_version_id), "
+                                   "(SELECT COUNT(*) FROM panel_genes pg WHERE pg.panel_version_id = pv.panel_version_id "
+                                   "AND pg.short_variants = 1), "
+                                   "(SELECT COUNT(*) FROM cases c WHERE c.panel_name = pv.panel_name "
+                                   "AND c.panel_version = pv.panel_version), pv.description "
+                                   "FROM panel_versions pv ORDER BY 1, 2")],
     }
+    out["gene_lists"]["synthetic_lists_loaded"] = sum("SYNTHETIC" in (x["description"] or "").upper()
+                                                      for x in out["gene_lists"]["lists"])
 
     # short variants in genes that are not in the assay's gene list (outdated list or symbol mismatch)
     outside = q(conn, """
@@ -137,12 +152,13 @@ def report(db: str, examples: int = 0) -> dict:
 
 
 def _median_ms(fn, repeat=5):
+    fn()                                   # warm-up (page cache, statement cache)
     times = []
     for _ in range(repeat):
         t0 = time.perf_counter()
         fn()
         times.append((time.perf_counter() - t0) * 1000)
-    return round(statistics.median(times), 1)
+    return round(statistics.median(times), 3)
 
 
 def benchmark(db: str) -> dict:
@@ -171,7 +187,8 @@ def benchmark(db: str) -> dict:
     }
     out = {"database_bytes": os.path.getsize(db),
            "rows": {t: q(conn, f"SELECT COUNT(*) FROM {t}")[0][0] for t in ("cases", "variants", "biomarkers")},
-           "sql_median_ms": {k: _median_ms(lambda s=s, a=a: conn.execute(s, a).fetchall()) for k, (s, a) in sql.items()}}
+           "sql_median_ms": {k: _median_ms(lambda s=s, a=a: conn.execute(s, a).fetchall(), repeat=21)
+                             for k, (s, a) in sql.items()}}
     conn.close()
 
     root = Path(__file__).resolve().parents[1]
@@ -211,7 +228,8 @@ def main(argv=None) -> int:
               f"({x['genome_build_source']})  n={x['n']}")
     pt = r["patients"]
     print(f"== Patients: {pt['distinct_patient_ids']} distinct patient IDs; {pt['reports_without_patient_id']} reports "
-          f"without one; {pt['patients_with_reports_from_2_or_more_assays']} patients tested with 2 or more assays")
+          f"without one {pt['reports_without_patient_id_by_panel']}; {pt['patients_with_2_or_more_reports']} patients "
+          f"with 2 or more reports, {pt['patients_with_reports_from_2_or_more_assays']} tested with 2 or more assays")
     print("== Variant rows")
     for x in r["variant_rows"]:
         print(f"  {x['panel_name']:<20} {x['variant_type']:<14} {x['n']}")
@@ -226,6 +244,12 @@ def main(argv=None) -> int:
           f"{c['with_oncotree_code']}, patient id {c['with_patient_id']}, sidecar-curated {c['with_curated_fields']}")
     g = r["gene_lists"]
     print(f"== Gene lists: {g['reports_with_gene_list']} of {g['reports']} reports have an assay gene list")
+    for x in g["lists"]:
+        print(f"     {x['panel_name']:<20} {str(x['panel_version']):<22} genes={x['genes']} "
+              f"(short variants {x['short_variant_genes']}) reports={x['reports']}  {(x['description'] or '')[:60]}")
+    if g["synthetic_lists_loaded"]:
+        print(f"  [WARNING] {g['synthetic_lists_loaded']} SYNTHETIC test gene list(s) loaded; load the official lists "
+              "with `python3 load_panel_genes.py <db> panels/`")
     og = r["genes_outside_gene_list"]
     print(f"== Short-variant rows in genes outside the assay gene list: {sum(x['n'] for x in og)} "
           f"({len(og)} panel/gene pairs); gene symbols harmonized to HGNC: {r['gene_symbols_harmonized']} rows")
@@ -246,9 +270,9 @@ def main(argv=None) -> int:
         b = r["benchmark"]
         print(f"== Benchmark: database {b['database_bytes'] / 1e6:.1f} MB; rows {b['rows']}")
         for k, v in b["sql_median_ms"].items():
-            print(f"     SQL  {k:<60} {v} ms")
+            print(f"     SQL  {k:<60} {v:.2f} ms")
         for k, v in b.get("cgi_end_to_end_median_ms", {}).items():
-            print(f"     CGI  {k:<60} {v} ms (includes Perl start-up)")
+            print(f"     CGI  {k:<60} {v:.1f} ms (includes Perl start-up)")
     return 0
 
 

@@ -102,15 +102,23 @@ notation only (no transcript model); see Limitations in the manuscript.
 ## `gene_symbol_map` — gene symbol harmonization
 
 Vendors do not all use current HGNC symbols; Foundation Medicine, for
-example, reports `WHSC1L1` where GenMineTOP reports `NSD3`.  The table lists
-the previous symbols used in the supported vendors' gene lists with their
-current approved symbol (HGNC complete set, accessed 2026-09-30): C11orf30 →
-EMSY, C17orf39 → GID4, FAM46C → TENT5C, H3F3A → H3-3A, MRE11A → MRE11,
-PARK2 → PRKN, WHSC1 → NSD2, WHSC1L1 → NSD3, FAM118B → SIRAL1, SLC22A18 →
-SLC67A1, STK19 → WHR1.  Loaders store the current symbol in `variants.gene`
-/ `other_gene` and `panel_genes.gene` (keeping the vendor symbol in
+example, reports `WHSC1L1` where GenMineTOP reports `NSD3`, and older
+Foundation Medicine reports use `MLL2` for `KMT2D`.  The table holds the
+previous HGNC symbols of every gene in the supported assays' gene lists with
+their current approved symbol — 599 symbols of 448 genes (HGNC complete set,
+downloaded 2026-09-30).  A previous symbol is included only if it belongs to
+exactly one gene and is neither the approved symbol nor an alias of another
+gene (so that a search for `ERK` is not answered with `EPHB2`), except where
+the vendors' gene lists give it as the synonym (`KMT2D (MLL2)`).  Aliases are
+not resolved.
+
+The table is filled by the loaders from `gene_symbol_map.tsv`, which
+`tools/make_symbol_map.py` regenerates from a newer HGNC file or after gene
+lists are added.  Loaders store the current symbol in `variants.gene` /
+`other_gene` and `panel_genes.gene` (keeping the vendor symbol in
 `variants.extra`), and the search interface resolves previous symbols, so a
-gene is counted once across vendors.
+gene is counted once across vendors.  After the map changes, reload the
+reports (the loaders are idempotent) so that stored rows use it.
 
 ## `cases` — one row per report
 

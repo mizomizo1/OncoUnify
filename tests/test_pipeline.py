@@ -225,7 +225,10 @@ class Pipeline(unittest.TestCase):
         i = r["inference_vs_vendor"]
         self.assertEqual(i["variants_with_vendor_category"], 13)
         self.assertEqual(i["same_term"], 12)   # TERT c.-124C>T: vendor 'promoter', rules '5_prime_UTR_variant'
-        self.assertEqual(r["gene_lists"], {"reports_with_gene_list": 7, "reports": 7})
+        g = r["gene_lists"]
+        self.assertEqual((g["reports_with_gene_list"], g["reports"]), (7, 7))
+        self.assertEqual(g["synthetic_lists_loaded"], 4)
+        self.assertEqual(r["genes_outside_gene_list"], [])
 
     # -- reviewer 1, M5: denominators -----------------------------------------
     def test_panel_denominators(self):

@@ -127,10 +127,14 @@ class Consequence(unittest.TestCase):
         term, so, source = oc.classify_consequence(None, None)
         self.assertEqual((term, so, source), ("sequence_variant", "SO:0001060", "unclassified"))
 
-    def test_gene_symbol_map_matches_schema(self):
+    def test_gene_symbol_map(self):
         conn = sqlite3.connect(":memory:")
-        conn.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
+        oc.init_db(conn)
         self.assertEqual(dict(conn.execute("SELECT previous_symbol, symbol FROM gene_symbol_map")), oc.GENE_SYMBOL_MAP)
+        m = oc.GENE_SYMBOL_MAP
+        self.assertEqual((m["MLL"], m["MLL2"], m["WHSC1L1"], m["C11orf30"]), ("KMT2A", "KMT2D", "NSD3", "EMSY"))
+        self.assertNotIn("ERK", m)                      # previous symbol of EPHB2, but an alias of MAPK1
+        self.assertEqual(set(m) & set(m.values()), set(), "a current symbol is also mapped")
         rows = [{"gene": "WHSC1L1", "other_gene": "MRE11A", "extra": '{"x": 1}'}, {"gene": "TP53"}]
         self.assertEqual(oc.harmonize_gene_symbols(rows), 2)
         self.assertEqual((rows[0]["gene"], rows[0]["other_gene"]), ("NSD3", "MRE11"))

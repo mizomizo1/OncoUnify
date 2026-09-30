@@ -123,6 +123,9 @@ def main(argv=None) -> int:
                 )
             print(f"[INFO] {meta['panel_name']} / {meta['panel_version']}: {len(rows)} genes <- {path}",
                   file=sys.stderr)
+            if "SYNTHETIC" in (meta.get("description") or "").upper():
+                print(f"[WARNING] {path.name} is a SYNTHETIC test list, not the vendor's assay content; "
+                      "for real reports load panels/", file=sys.stderr)
         except Exception as exc:
             failed += 1
             print(f"[ERROR] {path}: {exc}", file=sys.stderr)

@@ -73,6 +73,7 @@ database created by OncoUnify 1.x run `python3 migrate_db.py panels.db`.
 OncoUnify/
 ├── schema.sql              canonical schema (version 2)
 ├── oncounify_core.py       shared normalization library used by every loader
+├── gene_symbol_map.tsv     previous HGNC symbols -> current symbol (tools/make_symbol_map.py)
 ├── load_foundation.py      FoundationOne CDx / FoundationOne Liquid CDx XML
 ├── load_genminetop.py      GenMineTOP XML
 ├── load_guardant.py        Guardant360 CDx XLSX
@@ -85,6 +86,7 @@ OncoUnify/
 ├── search.html             search form
 ├── panels/                 official assay gene lists (see panels/README.md)
 ├── tools/qc_report.py      registry quality report (incl. consequence-inference check)
+├── tools/make_symbol_map.py  regenerates gene_symbol_map.tsv from the HGNC complete set
 ├── docs/                   INSTALL, SCHEMA, LOADER_DEV, CURATION, field_mapping.tsv, WORKED_EXAMPLE
 ├── docker/, Dockerfile, docker-compose.yml
 └── tests/                  synthetic fixtures, fixture generator, unit and end-to-end tests
