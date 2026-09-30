@@ -202,6 +202,15 @@ class Pipeline(unittest.TestCase):
         row = sqlite3.connect(db).execute("SELECT report_id, patient_id FROM cases").fetchone()
         self.assertEqual(row, ("SYNPT-0001", "SYN-G360-0001"))
 
+    # -- reviewer 3, major 8: reliability of rule-based consequences ------------
+    def test_qc_report(self):
+        p = run(ROOT / "tools" / "qc_report.py", self.db, "--json")
+        r = json.loads(p.stdout)
+        i = r["inference_vs_vendor"]
+        self.assertEqual(i["variants_with_vendor_category"], 12)
+        self.assertEqual(i["same_term"], 11)   # TERT c.-124C>T: vendor 'promoter', rules '5_prime_UTR_variant'
+        self.assertEqual(r["gene_lists"], {"reports_with_gene_list": 7, "reports": 7})
+
     # -- reviewer 1, M5: denominators -----------------------------------------
     def test_panel_denominators(self):
         tested = dict(self.q("SELECT gene, COUNT(DISTINCT case_id) FROM v_case_genes_tested "
