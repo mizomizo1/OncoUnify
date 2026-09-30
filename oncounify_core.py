@@ -439,6 +439,12 @@ def _indel_len_from_cds(cds_body: str, positions) -> Optional[int]:
     if not positions or any(o != 0 for (_, _, o) in positions):
         return None
     span = positions[-1][1] - positions[0][1] + 1 if len(positions) == 2 else 1
+    # Foundation Medicine writes deletion-insertions as substitutions:
+    # 2034G>CA (G replaced by CA), 2237_2255>T (19 bases replaced by T)
+    gt = re.match(r"^[-*]?\d+(?:_[-*]?\d+)?([ACGTN]*)>([ACGTN]+)$", cds_body)
+    if gt:
+        ref_len = len(gt.group(1)) if gt.group(1) else span
+        return len(gt.group(2)) - ref_len
     if "delins" in cds_body:
         ins = re.search(r"delins([ACGTN]+)$", cds_body)
         if not ins:
@@ -457,21 +463,37 @@ def _indel_len_from_cds(cds_body: str, positions) -> Optional[int]:
     return None
 
 
-def _inframe_from_protein(p: str) -> str:
-    if "delins" in p:
-        m = re.match(r"^[A-Z*](\d+)(?:_[A-Z*](\d+))?delins([A-Z*]+)$", p)
-        if m:
-            deleted = (int(m.group(2)) - int(m.group(1)) + 1) if m.group(2) else 1
-            inserted = len(m.group(3))
-            if inserted < deleted:
-                return "inframe_deletion"
-            if inserted > deleted:
-                return "inframe_insertion"
-            return "missense_variant"
+# p.E746_S752delinsV, and the Foundation Medicine form E746_S752>V
+_PROT_DELINS = re.compile(r"^([A-Z*])(\d+)(?:_([A-Z*])(\d+))?(?:delins|>)([A-Z*]+)$")
+
+_INFRAME_OR_MORE_SPECIFIC = ("inframe_deletion", "inframe_insertion", "inframe_indel",
+                             "stop_gained", "stop_lost", "start_lost", "missense_variant")
+
+
+def _protein_indel_class(p: str) -> Optional[str]:
+    """Class of a non-frameshift protein deletion / insertion / deletion-insertion."""
+    m = _PROT_DELINS.match(p)
+    if m:
+        first, start, end, inserted = m.group(1), int(m.group(2)), m.group(4), m.group(5)
+        deleted = (int(end) - start + 1) if end else 1
+        if "*" in inserted:
+            return "stop_gained"
+        if first == "*":
+            return "stop_lost"
+        if first == "M" and start == 1:
+            return "start_lost"
+        if len(inserted) < deleted:
+            return "inframe_deletion"
+        if len(inserted) > deleted:
+            return "inframe_insertion"
+        return "missense_variant"          # multi-residue substitution of equal length
+    if "delins" in p or ">" in p:
         return "inframe_indel"
     if "del" in p:
         return "inframe_deletion"
-    return "inframe_insertion"
+    if "ins" in p or "dup" in p:
+        return "inframe_insertion"
+    return None
 
 
 def _classify_from_protein(p: str) -> Optional[str]:
@@ -482,19 +504,19 @@ def _classify_from_protein(p: str) -> Optional[str]:
         return "stop_lost"
     if re.match(r"^\*\d+(=|\*)$", p):
         return "stop_retained_variant"
+    # stop_gained before start_lost: p.M1* is reported as nonsense (and ranks
+    # above start_lost in the Ensembl VEP severity order)
+    if re.match(r"^[A-Z]\d+\*$", p):
+        return "stop_gained"
     if re.match(r"^\*\d+[A-Z]", p):
         return "stop_lost"
     if re.match(r"^M1(?!\d)(?!=)", p):
         return "start_lost"
-    if re.match(r"^[A-Z]\d+\*$", p):
-        return "stop_gained"
     if re.match(r"^[A-Z*]\d+=$", p):
         return "synonymous_variant"
     if re.match(r"^[A-Z]\d+[A-Z]$", p):
         return "missense_variant"
-    if re.search(r"(del|ins|dup)", p):
-        return _inframe_from_protein(p)
-    return None
+    return _protein_indel_class(p)
 
 
 def classify_consequence(
@@ -540,8 +562,13 @@ def classify_consequence(
                                      "exon_loss": "exon_loss_variant"}[splice], "vendor")
                     return done("splice_region_variant", "vendor")
                 if target == "@inframe":
-                    if p:
-                        return done(_inframe_from_protein(p), "vendor")
+                    # the vendor says "not a frameshift"; refine from the notation
+                    t = _classify_from_protein(p) if p else None
+                    if t in _INFRAME_OR_MORE_SPECIFIC:
+                        return done(t, "vendor")
+                    net = _indel_len_from_cds(c_body, positions)
+                    if net:
+                        return done("inframe_deletion" if net < 0 else "inframe_insertion", "vendor")
                     return done("inframe_indel", "vendor")
                 return done(target, "vendor")
 

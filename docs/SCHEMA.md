@@ -69,15 +69,26 @@ The same function is used by every loader:
    intronic offsets in the coding change, `promoter` → upstream_gene_variant.
    `functional_effect_source = 'vendor'`.
 2. **Protein change** (`hgvs_p`): `fs` → frameshift; `ext` or `*n<aa>` →
-   stop_lost; `M1…` → start_lost; `<aa>n*` → stop_gained; `<aa>n=` →
-   synonymous; `<aa>n<aa>` → missense; `del`/`ins`/`dup`/`delins` → in-frame
-   deletion/insertion (by net length).
+   stop_lost; `<aa>n*` → stop_gained (also for `p.M1*`, which ranks above
+   start_lost in the Ensembl VEP severity order); other `M1…` → start_lost;
+   `<aa>n=` → synonymous; `<aa>n<aa>` → missense; `del`/`ins`/`dup`/`delins`,
+   including Foundation Medicine's substitution-style form `E746_S752>V` →
+   in-frame deletion/insertion by net length, stop_gained if the replacement
+   contains a stop codon, missense if the lengths are equal.
 3. **Coding change** (`hgvs_c`): offsets ±1–2 → donor/acceptor (also for
    ranges that cross the exon boundary, e.g. `c.905-9_905del`), ±3–8 →
    splice_region, larger → intron; a range from one intron across whole exons
-   to another → exon_loss; `c.-n` → 5′UTR; `c.*n` → 3′UTR; exonic indels →
-   frameshift or in-frame from their length; an exonic substitution with no
-   protein change → coding_sequence_variant.
+   to another → exon_loss; `c.-n` → 5′UTR; `c.*n` → 3′UTR; exonic indels
+   (including substitution-style `c.2237_2255>T` and `c.2034G>CA`) →
+   frameshift or in-frame from their net length; an exonic substitution with
+   no protein change → coding_sequence_variant.
+
+When the vendor category is "nonframeshift", the protein change refines it
+(in-frame deletion or insertion, stop gained/lost, start lost).
+
+`tools/qc_report.py` measures how often the rules in steps 2–6 reproduce
+the vendor category for Foundation Medicine variants and lists the
+discordant notations (`--examples`).
 4. **Vendor hint** (Guardant `reporting_category`, GenMineTOP `type`):
    `promoter` → upstream_gene_variant, `utr` → UTR_variant, `non_coding` →
    non_coding_transcript_variant, RNA exon skipping → exon_loss_variant.

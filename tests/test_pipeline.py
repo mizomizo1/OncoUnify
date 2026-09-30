@@ -197,10 +197,14 @@ class Pipeline(unittest.TestCase):
 
     def test_filename_pattern_is_configurable(self):
         db = self.tmp / "pattern.db"
-        run(ROOT / "load_guardant.py", db, DATA / "guardant" / "Interim_SYN-G360-0001_SYNPT-0001.xlsx",
-            "--filename-pattern", r"^Interim_(?P<patient_id>[^_]+)_(?P<report_id>[^_]+)$", "--quiet")
+        run(ROOT / "load_guardant.py", db, DATA / "guardant" / "Interim_SYNPT-0001_SYN-G360-0001.xlsx",
+            "--filename-pattern", r"^Interim_(?P<report_id>[^_]+)_(?P<patient_id>[^_]+)$", "--quiet")
         row = sqlite3.connect(db).execute("SELECT report_id, patient_id FROM cases").fetchone()
         self.assertEqual(row, ("SYNPT-0001", "SYN-G360-0001"))
+
+    def test_default_filename_pattern_is_patient_then_report(self):
+        row = self.q("SELECT report_id, patient_id FROM cases WHERE panel_name = 'Guardant' ORDER BY report_id")
+        self.assertEqual(row, [("SYN-G360-0001", "SYNPT-0001"), ("SYN-G360-0002", "SYNPT-0004")])
 
     # -- reviewer 3, major 8: reliability of rule-based consequences ------------
     def test_qc_report(self):

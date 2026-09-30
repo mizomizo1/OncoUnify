@@ -99,6 +99,26 @@ class Consequence(unittest.TestCase):
         self.assertEqual(self.term(None, "c.123_125dup"), "inframe_insertion")
         self.assertEqual(self.term(None, "c.35G>A"), "coding_sequence_variant")
 
+    def test_foundation_substitution_style_delins(self):
+        # discordances found by tools/qc_report.py on institutional data
+        self.assertEqual(self.term("E746_S752>V"), "inframe_deletion")
+        self.assertEqual(self.term("E746_S752>V", "2236_2256>GTT", vendor_term="nonframeshift"), "inframe_deletion")
+        self.assertEqual(self.term("D770_N771>DSVDN"), "inframe_insertion")
+        self.assertEqual(self.term("G12_G13>VC"), "missense_variant")
+        self.assertEqual(self.term("Q12_K13>*"), "stop_gained")
+        self.assertEqual(self.term("Q12_K13delins*"), "stop_gained")
+        self.assertEqual(self.term(None, "c.2237_2255>T"), "inframe_deletion")
+        self.assertEqual(self.term(None, "c.2034G>CA"), "frameshift_variant")
+        self.assertEqual(self.term(None, "c.2034G>A"), "coding_sequence_variant")
+
+    def test_nonsense_at_start_codon_and_nonframeshift_refinement(self):
+        self.assertEqual(self.term("M1*"), "stop_gained")
+        self.assertEqual(self.term("M1*", "1A>T", vendor_term="nonsense"), "stop_gained")
+        self.assertEqual(self.term("M1?"), "start_lost")
+        self.assertEqual(self.term("*1165Yext*9", vendor_term="nonframeshift"), "stop_lost")
+        self.assertEqual(self.term(None, "2310_2311insGGT", vendor_term="nonframeshift"), "inframe_insertion")
+        self.assertEqual(self.term("V600_K601>E", vendor_term="nonframeshift"), "inframe_deletion")
+
     def test_hints_and_fallback(self):
         self.assertEqual(self.term(None, None, hint="promoter"), "upstream_gene_variant")
         self.assertEqual(self.term(None, None, hint="splicing-variant"), "exon_loss_variant")
