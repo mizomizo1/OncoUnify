@@ -153,6 +153,14 @@ class Consequence(unittest.TestCase):
 
 
 class Documentation(unittest.TestCase):
+    def test_new_assay_request_template(self):
+        form = (ROOT / ".github" / "ISSUE_TEMPLATE" / "new_assay.yml").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("template=new_assay.yml", readme)
+        self.assertIn("Never attach a real patient report", form)
+        privacy = form[form.index("id: privacy"):]
+        self.assertIn("required: true", privacy)          # the no-patient-data confirmation cannot be skipped
+
     def test_field_mapping_covers_every_canonical_column(self):
         rows = (ROOT / "docs" / "field_mapping.tsv").read_text(encoding="utf-8").splitlines()[1:]
         listed = {tuple(r.split("\t")[:2]) for r in rows if r}

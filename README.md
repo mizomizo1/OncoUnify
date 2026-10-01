@@ -103,11 +103,32 @@ The fixtures under `tests/data/` are fully synthetic (invented identifiers,
 public hotspot variants).  **Never place real vendor reports inside this
 repository.**
 
+## Requesting support for a new assay
+
+You do not need to write code to have another assay supported.  Open an
+issue with the
+[**Request support for a new assay**](https://github.com/mizomizo1/OncoUnify/issues/new?template=new_assay.yml)
+template and provide one of the following:
+
+* a de-identified example report (every identifier, name, date and
+  free-text clinical field replaced with invented values);
+* a synthetic report in the vendor's format; or
+* the vendor's format specification (for example an XSD or a data
+  dictionary).
+
+We write the loader, derive synthetic test fixtures from the example and add
+them to the test suite, so that the new assay is tested like the existing
+ones.  **Never attach real patient reports: issues are public.**  If a
+de-identified file cannot be posted publicly, say so in the issue and we will
+arrange another route.
+
 ## Extending OncoUnify
 
-A new assay needs one `load_<vendor>.py` that parses the vendor file into the
-canonical dictionaries and hands them to `oncounify_core`; the schema, the
-normalization rules and the web layer are shared.  See
+Contributed loaders are equally welcome.  A new assay needs one
+`load_<vendor>.py` that parses the vendor file into the canonical
+dictionaries and hands them to `oncounify_core`; the schema, the
+normalization rules and the web layer are shared.  A contributed loader
+comes with synthetic fixtures and tests.  See
 [docs/LOADER_DEV.md](docs/LOADER_DEV.md).
 
 ## License and citation

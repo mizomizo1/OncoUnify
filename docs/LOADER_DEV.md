@@ -7,6 +7,12 @@ transactional replacement, the curation sidecar, command-line options,
 summary and exit codes — is provided by `oncounify_core` and is therefore
 identical for every assay.
 
+If you would rather not write the loader yourself, request one: open an
+issue with the "Request support for a new assay" template and attach a
+de-identified or synthetic example report, or the vendor's format
+specification (see "Requesting support for a new assay" in the README).
+Never attach real patient reports.
+
 ## 1. Minimal skeleton
 
 ```python

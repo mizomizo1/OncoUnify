@@ -65,3 +65,7 @@ reports or upgraded with `migrate_db.py`.
 - MIT LICENSE file, Dockerfile and docker-compose demo, GitHub Actions CI,
   synthetic fixtures and automated tests, complete field mapping
   (`docs/field_mapping.tsv`), worked example, curation guide.
+- Requests for new assays: README section and GitHub issue form
+  (`.github/ISSUE_TEMPLATE/new_assay.yml`); the maintainers write the loader
+  from a de-identified or synthetic example or the vendor's format
+  specification, and add synthetic fixtures to the test suite.

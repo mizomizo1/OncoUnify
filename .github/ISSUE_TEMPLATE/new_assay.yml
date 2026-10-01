@@ -1,0 +1,83 @@
+name: Request support for a new assay
+description: Ask the maintainers to write a loader for a cancer panel report format that OncoUnify does not read yet.
+title: "[New assay] <vendor> <assay name and version>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping OncoUnify support more assays. We write loaders for new report formats on request,
+        so that this work does not fall on each adopting institution. From your example we also derive synthetic
+        test fixtures, so that the new loader is tested like the existing ones.
+
+        **Never attach a real patient report. Issues are public.** Vendor reports contain names, medical record
+        numbers, dates of birth and other identifiers. Attach only a de-identified example (every identifier, name,
+        date and free-text clinical field replaced with invented values), a synthetic file in the vendor's format,
+        or the vendor's format specification.
+  - type: input
+    id: vendor
+    attributes:
+      label: Vendor
+      placeholder: e.g. Illumina, Caris Life Sciences, Tempus, in-house laboratory
+    validations:
+      required: true
+  - type: input
+    id: assay
+    attributes:
+      label: Assay and version
+      placeholder: e.g. TruSight Oncology 500, v2
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Format of the deliverable
+      options:
+        - XML
+        - JSON
+        - XLSX or CSV
+        - VCF or MAF
+        - PDF only
+        - Other (describe below)
+    validations:
+      required: true
+  - type: dropdown
+    id: material
+    attributes:
+      label: What can you provide?
+      multiple: true
+      options:
+        - De-identified example report(s)
+        - Synthetic report(s) in the vendor's format
+        - Vendor format specification or schema (XSD, data dictionary)
+        - Description only (no file yet)
+    validations:
+      required: true
+  - type: textarea
+    id: contents
+    attributes:
+      label: Content of the deliverable
+      description: >-
+        Which alteration classes and fields does the report contain (short variants, copy number, fusions, TMB, MSI,
+        expression, germline findings)? Is the reference genome stated? How do the report and patient identifiers
+        appear (inside the file or in the file name)?
+    validations:
+      required: false
+  - type: textarea
+    id: files
+    attributes:
+      label: Files or links
+      description: >-
+        Drag de-identified or synthetic files here, or link to a public specification. If a de-identified file cannot
+        be posted publicly, say so here and we will arrange another route.
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Data protection
+      options:
+        - label: >-
+            The attached files contain no patient data: every identifier, name, date and free-text clinical field has
+            been removed or replaced with invented values.
+          required: true
